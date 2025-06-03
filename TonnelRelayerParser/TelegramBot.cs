@@ -1,9 +1,10 @@
-﻿using Telegram.Bot;
+﻿using Moahk.ResponseModels;
+using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 
-namespace TonnelRelayerParser;
+namespace Moahk;
 
 public class TelegramBot
 {
@@ -104,7 +105,7 @@ public class TelegramBot
 
     public async Task SendMessage2Async((GiftInfo, TonnelRelayerGiftInfo) giftInfo, double currentPrice,
         double middlePrice,
-        double percentDiff, Activity activity, PortalsSearchResponse.Result portalsSearchResponse)
+        double percentDiff, Activity activity, PortalsSearch.Result portalsSearchResponse)
     {
         var msg = $"""
                    🎁 <b>{giftInfo.Item2.Name} | {giftInfo.Item2.Model} ({giftInfo.Item2.Backdrop})</b> 🎨

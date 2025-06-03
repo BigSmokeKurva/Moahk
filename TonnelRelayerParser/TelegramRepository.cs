@@ -3,7 +3,7 @@ using NLog;
 using TL;
 using WTelegram;
 
-namespace TonnelRelayerParser;
+namespace Moahk;
 
 public class TelegramRepository : IDisposable
 {

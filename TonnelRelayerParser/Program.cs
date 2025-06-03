@@ -1,6 +1,6 @@
 ﻿using NLog;
 
-namespace TonnelRelayerParser;
+namespace Moahk;
 
 internal static class Program
 {

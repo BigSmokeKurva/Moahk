@@ -2,7 +2,7 @@
 using AngleSharp.Html.Parser;
 using NLog;
 
-namespace TonnelRelayerParser;
+namespace Moahk;
 
 public class GiftManager
 {
@@ -33,23 +33,14 @@ public class GiftManager
 
         return new GiftInfo
         {
-            Model = (model, double.Parse(modelPercentage[..^1], CultureInfo.InvariantCulture)),
-            Backdrop = (backdrop, double.Parse(backdropPercentage[..^1], CultureInfo.InvariantCulture)),
-            Symbol = (symbol, double.Parse(symbolPercentage[..^1], CultureInfo.InvariantCulture)),
+            Model = (model, double.Parse(modelPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
+            Backdrop = (backdrop,
+                double.Parse(backdropPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
+            Symbol = (symbol, double.Parse(symbolPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
             // Quantity = (int.Parse(quantityParts[0], NumberStyles.AllowThousands),
             //     int.Parse(quantityParts[1], NumberStyles.AllowThousands)),
             IsSold = isSoldElement is not null,
             Id = giftId
         };
     }
-}
-
-public struct GiftInfo
-{
-    public (string, double) Model;
-    public (string, double) Backdrop;
-    public (string, double) Symbol;
-    public (int Issued, int All) Quantity;
-    public bool IsSold;
-    public string Id;
 }
