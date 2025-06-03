@@ -9,9 +9,11 @@ public class TelegramRepository : IDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private static string? _tgWebAppData;
+    private static string? _tonnelRelayerTonnelRelayerTgWebAppData;
+    private static string? _portalsTgWebAppData;
 
-    private static string? _tonnelRelayerTgWebAppData;
+    private static string? _tonnelRelayerDecodedTgWebAppData;
+    private static string? _portalsDecodedTgWebAppData;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly Client _client;
 
@@ -26,21 +28,38 @@ public class TelegramRepository : IDisposable
         _client = new Client(Config);
     }
 
-    public static string? TgWebAppData
+    public static string? TonnelRelayerTgWebAppData
     {
-        get => _tgWebAppData;
+        get => _tonnelRelayerTonnelRelayerTgWebAppData;
         private set
         {
-            _tgWebAppData = value;
-            TonnelRelayerTgWebAppData = HttpUtility.UrlDecode(value?.Split("&tgWebAppVersion")[0]);
-            Logger.Info("TgWebAppData updated");
+            _tonnelRelayerTonnelRelayerTgWebAppData = value;
+            TonnelRelayerDecodedTgWebAppData = HttpUtility.UrlDecode(value?.Split("&tgWebAppVersion")[0]);
+            Logger.Info("TonnelRelayer TgWebAppData updated");
         }
     }
 
-    public static string? TonnelRelayerTgWebAppData
+    public static string? TonnelRelayerDecodedTgWebAppData
     {
-        get => _tonnelRelayerTgWebAppData ?? throw new Exception("TgWebAppData is null.");
-        private set => _tonnelRelayerTgWebAppData = value;
+        get => _tonnelRelayerDecodedTgWebAppData ?? throw new Exception("TgWebAppData is null.");
+        private set => _tonnelRelayerDecodedTgWebAppData = value;
+    }
+
+    public static string? PortalsTgWebAppData
+    {
+        get => _portalsTgWebAppData;
+        private set
+        {
+            _portalsTgWebAppData = value;
+            PortalsDecodedTgWebAppData = HttpUtility.UrlDecode(value?.Split("&tgWebAppVersion")[0]);
+            Logger.Info("Portals TgWebAppData updated");
+        }
+    }
+
+    public static string? PortalsDecodedTgWebAppData
+    {
+        get => _portalsDecodedTgWebAppData ?? throw new Exception("Portals TgWebAppData is null.");
+        private set => _portalsDecodedTgWebAppData = value;
     }
 
     public void Dispose()
@@ -56,7 +75,8 @@ public class TelegramRepository : IDisposable
         {
             try
             {
-                TgWebAppData = await RequestAppWebView();
+                TonnelRelayerTgWebAppData = await RequestAppWebView("tonnel_network_bot", "gift");
+                PortalsTgWebAppData = await RequestAppWebView("portals", "market");
             }
             catch (Exception e)
             {
@@ -67,21 +87,21 @@ public class TelegramRepository : IDisposable
         }
     }
 
-    private async Task<string?> RequestAppWebView()
+    private async Task<string?> RequestAppWebView(string botName, string shortName)
     {
         try
         {
-            var chat = await _client.Contacts_ResolveUsername("tonnel_network_bot");
+            var chat = await _client.Contacts_ResolveUsername(botName);
             if (chat?.User == null)
             {
-                Logger.Error("Пользователь 'tonnel_network_bot' не найден.");
+                Logger.Error($"Пользователь '{botName}' не найден.");
                 return null;
             }
 
             var app = new InputBotAppShortName
             {
                 bot_id = new InputUser(chat.User.ID, chat.User.access_hash),
-                short_name = "gift"
+                short_name = shortName
             };
 
             var webView = await _client.Messages_RequestAppWebView(

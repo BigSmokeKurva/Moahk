@@ -10,6 +10,7 @@ public class TelegramBot
     private static readonly long[] AdminId = [7458768874, 7293810669];
     private readonly TelegramBotClient _botClient = new("7989604756:AAH3CJeYIa_lzHecT4uGgGuFbOXaRR9APyM");
     private long _chatId;
+    private long _chatId2;
 
     public TelegramBot()
     {
@@ -21,6 +22,16 @@ public class TelegramBot
         else
         {
             _chatId = 0;
+        }
+
+        if (File.Exists("chat_id2.txt"))
+        {
+            var chatIdText = File.ReadAllText("chat_id2.txt");
+            _chatId2 = long.TryParse(chatIdText, out var chatId) ? chatId : 0;
+        }
+        else
+        {
+            _chatId2 = 0;
         }
 
         _botClient.OnMessage += async (sender, args) =>
@@ -40,6 +51,11 @@ public class TelegramBot
             case "/chat" when msg.From != null && AdminId.Contains(msg.From.Id):
                 _chatId = msg.Chat.Id;
                 await File.WriteAllTextAsync("chat_id.txt", _chatId.ToString());
+                await _botClient.SendMessage(msg.Chat, "OK");
+                break;
+            case "/chat2" when msg.From != null && AdminId.Contains(msg.From.Id):
+                _chatId2 = msg.Chat.Id;
+                await File.WriteAllTextAsync("chat_id2.txt", _chatId2.ToString());
                 await _botClient.SendMessage(msg.Chat, "OK");
                 break;
         }
@@ -80,6 +96,43 @@ public class TelegramBot
         ]);
         await _botClient.SendMessage(
             _chatId,
+            msg,
+            ParseMode.Html,
+            replyMarkup: keyboard
+        );
+    }
+
+    public async Task SendMessage2Async((GiftInfo, TonnelRelayerGiftInfo) giftInfo, double currentPrice,
+        double middlePrice,
+        double percentDiff, Activity activity, PortalsSearchResponse.Result portalsSearchResponse)
+    {
+        var msg = $"""
+                   🎁 <b>{giftInfo.Item2.Name} | {giftInfo.Item2.Model} ({giftInfo.Item2.Backdrop})</b> 🎨
+                   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                   💎 Цены:
+                   ▫️ PORTAL: {currentPrice:F2}  ({percentDiff:F2}%)
+                   ▫️ Сред. макс. (14 дн): {middlePrice:F2}
+                   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                   ⚠️ Активность: {activity switch
+                   {
+                       Activity.Low => "Низкая",
+                       Activity.Medium => "Средняя",
+                       _ => "Высокая"
+                   }}
+                   🧹 Состояние: {(giftInfo.Item1.IsSold ? "Грязный" : "Чистый")}
+                   """;
+        // клавиатура с двумя кнопками (ссылками)
+        var keyboard = new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithUrl("Ссылка на подарок",
+                    $"https://t.me/nft/{giftInfo.Item1.Id}"),
+                InlineKeyboardButton.WithUrl("Ссылка на бота",
+                    $"https://t.me/portals/market?startapp=gift_{portalsSearchResponse.Id}")
+            ]
+        ]);
+        await _botClient.SendMessage(
+            _chatId2,
             msg,
             ParseMode.Html,
             replyMarkup: keyboard

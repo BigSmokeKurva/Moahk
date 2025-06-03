@@ -1,4 +1,6 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.Caching;
 using System.Text.Json.Serialization;
@@ -20,6 +22,8 @@ public class Parser : IDisposable
         Channel.CreateBounded<(GiftInfo, TonnelRelayerGiftInfo)>(1000);
 
     private readonly HttpClient[] _pageClients;
+    private readonly HttpClient _portalsClient;
+
     private readonly TelegramBot _telegramBot = new();
 
     static Parser()
@@ -52,13 +56,38 @@ public class Parser : IDisposable
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
             }
         };
+        var portalsHeaders = new[]
+        {
+            new[] { "accept", "application/json, text/plain, */*" },
+            new[] { "accept-language", "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7" },
+            new[] { "priority", "u=1, i" },
+            new[] { "referer", "https://portals-market.com/" },
+            new[]
+            {
+                "sec-ch-ua",
+                "\"Microsoft Edge\";v=\"136\", \"Microsoft Edge WebView2\";v=\"136\", \"Not.A/Brand\";v=\"99\", \"Chromium\";v=\"136\""
+            },
+            new[] { "sec-ch-ua-mobile", "?0" },
+            new[] { "sec-ch-ua-platform", "\"Windows\"" },
+            new[] { "sec-fetch-dest", "empty" },
+            new[] { "sec-fetch-mode", "cors" },
+            new[] { "sec-fetch-site", "same-origin" },
+            new[]
+            {
+                "user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
+            }
+        };
         _pageClients = PageProxies.Select(x => CreateClient(x, headers)).ToArray();
         _activityClients = ActivityProxies.Select(x => CreateClient(x, headers)).ToArray();
+        _portalsClient = new HttpClient();
+        AddHeaders(_portalsClient, portalsHeaders);
     }
 
     public void Dispose()
     {
         foreach (var client in _pageClients.Concat(_activityClients)) client.Dispose();
+        _portalsClient.Dispose();
         _cancellationTokenSource.Cancel();
         GC.SuppressFinalize(this);
     }
@@ -66,9 +95,14 @@ public class Parser : IDisposable
     private static HttpClient CreateClient(WebProxy proxy, string[][] headers)
     {
         var client = new HttpClient(new HttpClientHandler { Proxy = proxy });
+        AddHeaders(client, headers);
+        return client;
+    }
+
+    private static void AddHeaders(HttpClient client, string[][] headers)
+    {
         foreach (var h in headers)
             client.DefaultRequestHeaders.Add(h[0], h[1]);
-        return client;
     }
 
     private static WebProxy[] LoadProxies(string fileName)
@@ -101,11 +135,11 @@ public class Parser : IDisposable
 
     public async Task Start()
     {
-        _ = RunGetMarketGiftsLoop();
-        _ = Task.WhenAll(_activityClients.Select(ActivityThread));
+        _ = RunTonnelGetMarketGiftsLoop();
+        _ = Task.WhenAll(_activityClients.Select(TonnelActivityThread));
     }
 
-    private async Task ActivityThread(HttpClient client)
+    private async Task TonnelActivityThread(HttpClient client)
     {
         while (!_cancellationTokenSource.IsCancellationRequested)
         {
@@ -130,7 +164,7 @@ public class Parser : IDisposable
                     "https://gifts2.tonnel.network/api/saleHistory",
                     new
                     {
-                        authData = TelegramRepository.TonnelRelayerTgWebAppData,
+                        authData = TelegramRepository.TonnelRelayerDecodedTgWebAppData,
                         page = 1,
                         limit = 50,
                         type = "ALL",
@@ -167,15 +201,15 @@ public class Parser : IDisposable
                         .OrderByDescending(x => x.Price).Take(3).ToArray();
                     var middlePrice = threeMaxPriceItems.Sum(x => x.Price) / threeMaxPriceItems.Length;
                     var currentPrice = giftInfo.Item2.Price + giftInfo.Item2.Price * 0.1;
-                    var percentDiff = (middlePrice - currentPrice) / middlePrice * 100.0;
-                    if (percentDiff > 10)
+                    var percentDiffTonnel = (middlePrice - currentPrice) / middlePrice * 100.0;
+                    var activity = relayerHistoryGiftInfos.Length switch
                     {
-                        var activity = relayerHistoryGiftInfos.Length switch
-                        {
-                            < 5 => Activity.Low,
-                            < 10 => Activity.Medium,
-                            _ => Activity.High
-                        };
+                        < 5 => Activity.Low,
+                        < 10 => Activity.Medium,
+                        _ => Activity.High
+                    };
+                    if (percentDiffTonnel > 10)
+                    {
                         _cache.Set(giftInfo.Item1.Id + giftInfo.Item2.Price, 0,
                             DateTimeOffset.UtcNow.AddMinutes(60));
                         Logger.Info($"""
@@ -185,7 +219,7 @@ public class Parser : IDisposable
                                      Фон: {giftInfo.Item2.Backdrop}
                                      Цена сейчас: {currentPrice:F2}
                                      Сред. Макс. цена за 14 дней: {middlePrice:F2}
-                                     Разница: {percentDiff:F2}%
+                                     Разница: {percentDiffTonnel:F2}%
                                      Активность: {activity switch
                                      {
                                          Activity.Low => "Низкая",
@@ -195,12 +229,52 @@ public class Parser : IDisposable
                                      {(giftInfo.Item1.IsSold ? "Грязный" : null)}
                                      """);
                         await _telegramBot.SendMessageAsync(giftInfo, (double)currentPrice!, (double)middlePrice!,
-                            (double)percentDiff, activity);
+                            (double)percentDiffTonnel, activity);
                     }
                     else
                     {
                         _cache.Set(giftInfo.Item1.Id + giftInfo.Item2.Price, 0,
                             DateTimeOffset.UtcNow.AddMinutes(30));
+                    }
+
+                    var portalsGift = await PortalsCheckGift(giftInfo);
+                    if (portalsGift?.Price != null)
+                    {
+                        var percentDiffPortals = (middlePrice - double.Parse(portalsGift.Price, NumberStyles.Any)) /
+                            middlePrice * 100.0;
+                        if (percentDiffPortals > 10)
+                        {
+                            _cache.Set(giftInfo.Item1.Id + giftInfo.Item2.Price, 0,
+                                DateTimeOffset.UtcNow.AddMinutes(60));
+                            var msg = $"""
+                                       🎁 *{portalsGift.Name}* 
+                                       Модель: *{giftInfo.Item2.Model}* 
+                                       Фон: *{giftInfo.Item2.Backdrop}* 
+                                       🎨  
+                                       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  
+                                       💎 Цены:  
+                                       ▫️ PORTAL: {portalsGift.Price}  ({percentDiffPortals:F2}%)  
+                                       ▫️ Сред. макс. (14 дн): {middlePrice:F2}  
+                                       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  
+                                       ⚠️ Активность: {activity switch
+                                       {
+                                           Activity.Low => "Низкая",
+                                           Activity.Medium => "Средняя",
+                                           _ => "Высокая"
+                                       }}  
+                                       🧹 Состояние: {(giftInfo.Item1.IsSold ? "Грязный" : "Чистый")}
+                                       """;
+                            Logger.Info(msg);
+                            await _telegramBot.SendMessage2Async(giftInfo,
+                                double.Parse(portalsGift.Price, NumberStyles.Any), (double)middlePrice!,
+                                (double)percentDiffPortals, activity, portalsGift);
+                        }
+                        else
+                        {
+                            if (!_cache.Contains(giftInfo.Item1.Id + giftInfo.Item2.Price))
+                                _cache.Set(giftInfo.Item1.Id + giftInfo.Item2.Price, 0,
+                                    DateTimeOffset.UtcNow.AddMinutes(30));
+                        }
                     }
                 }
                 else
@@ -222,14 +296,53 @@ public class Parser : IDisposable
         }
     }
 
-    private async Task RunGetMarketGiftsLoop()
+    private async Task<PortalsSearchResponse.Result?> PortalsCheckGift((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
+    {
+        try
+        {
+            var backdrop = giftInfo.Item2.Backdrop!;
+            var backdropTrimmed = backdrop[..backdrop.LastIndexOf(' ')];
+            var model = giftInfo.Item2.Model!;
+            var modelTrimmed = model[..model.LastIndexOf(' ')];
+            var baseUrl = "https://portals-market.com/api/nfts/search";
+            var url = $"{baseUrl}?offset=0&limit=20" +
+                      $"&filter_by_backdrops={backdropTrimmed.Replace(' ', '+')}" +
+                      $"&filter_by_collections={giftInfo.Item2.Name.Replace(' ', '+')}" +
+                      $"&filter_by_models={modelTrimmed.Replace(' ', '+')}" +
+                      $"&sort_by=price+asc" +
+                      $"&status=listed";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue("tma", TelegramRepository.PortalsDecodedTgWebAppData);
+            using var response = await _portalsClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                Logger.Warn($"Ошибка при получении подарка {giftInfo.Item2.GiftId} на порталах: {response.StatusCode}");
+                return null;
+            }
+
+            var responseData = await response.Content.ReadFromJsonAsync<PortalsSearchResponse>();
+            if (responseData?.Results != null && responseData.Results.Length != 0)
+                return responseData.Results.MinBy(x => x.Price);
+            Logger.Warn($"Подарок {giftInfo.Item1.Id} не найден на порталах.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, $"Ошибка при проверке подарка {giftInfo.Item1.Id} на порталах.");
+        }
+
+        return null;
+    }
+
+    private async Task RunTonnelGetMarketGiftsLoop()
     {
         Logger.Info("Запущен цикл GetMarketGifts");
         while (!_cancellationTokenSource.IsCancellationRequested)
         {
             try
             {
-                await GetMarketGifts();
+                await TonnelGetMarketGifts();
             }
             catch (Exception e)
             {
@@ -240,12 +353,12 @@ public class Parser : IDisposable
         }
     }
 
-    private async Task GetMarketGifts()
+    private async Task TonnelGetMarketGifts()
     {
-        await Task.WhenAll(_pageClients.Select((client, idx) => GetMarketGiftPage(client, idx + 1)));
+        await Task.WhenAll(_pageClients.Select((client, idx) => TonnelGetMarketGiftPage(client, idx + 1)));
     }
 
-    private async Task GetMarketGiftPage(HttpClient client, int page)
+    private async Task TonnelGetMarketGiftPage(HttpClient client, int page)
     {
         try
         {
@@ -257,7 +370,7 @@ public class Parser : IDisposable
                 filter = "{\"price\":{\"$exists\":true},\"buyer\":{\"$exists\":false},\"asset\":\"TON\"}",
                 @ref = 0,
                 price_range = (object?)null,
-                user_auth = TelegramRepository.TonnelRelayerTgWebAppData
+                user_auth = TelegramRepository.TonnelRelayerDecodedTgWebAppData
             });
             if (!response.IsSuccessStatusCode)
                 throw new Exception(
@@ -329,6 +442,56 @@ public class TonnelRelayerHistoryGiftInfo
     [JsonPropertyName("asset")] public string? Asset { get; set; }
     [JsonPropertyName("type")] public string? Type { get; set; }
     [JsonPropertyName("__v")] public long? V { get; set; }
+}
+
+public class PortalsSearchResponse
+{
+    [JsonPropertyName("results")] public Result[]? Results { get; set; }
+
+    public class Attribute
+    {
+        [JsonPropertyName("type")] public string? Type { get; set; }
+
+        [JsonPropertyName("value")] public string? Value { get; set; }
+
+        [JsonPropertyName("rarity_per_mille")] public double? RarityPerMille { get; set; }
+    }
+
+    public class Result
+    {
+        [JsonPropertyName("id")] public string? Id { get; set; }
+
+        [JsonPropertyName("tg_id")] public string? TgId { get; set; }
+
+        [JsonPropertyName("collection_id")] public string? CollectionId { get; set; }
+
+        [JsonPropertyName("external_collection_number")]
+        public long? ExternalCollectionNumber { get; set; }
+
+        [JsonPropertyName("owner_id")] public object? OwnerId { get; set; }
+
+        [JsonPropertyName("name")] public string? Name { get; set; }
+
+        [JsonPropertyName("photo_url")] public string? PhotoUrl { get; set; }
+
+        [JsonPropertyName("price")] public string? Price { get; set; }
+
+        [JsonPropertyName("attributes")] public Attribute[]? Attributes { get; set; }
+
+        [JsonPropertyName("listed_at")] public DateTimeOffset? ListedAt { get; set; }
+
+        [JsonPropertyName("status")] public string? Status { get; set; }
+
+        [JsonPropertyName("animation_url")] public string? AnimationUrl { get; set; }
+
+        [JsonPropertyName("emoji_id")] public string? EmojiId { get; set; }
+
+        [JsonPropertyName("has_animation")] public bool? HasAnimation { get; set; }
+
+        [JsonPropertyName("floor_price")] public string? FloorPrice { get; set; }
+
+        [JsonPropertyName("unlocks_at")] public DateTimeOffset? UnlocksAt { get; set; }
+    }
 }
 
 public enum Activity
