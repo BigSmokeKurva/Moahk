@@ -1,4 +1,4 @@
-﻿namespace Moahk;
+﻿namespace Moahk.Parser;
 
 public struct GiftInfo
 {

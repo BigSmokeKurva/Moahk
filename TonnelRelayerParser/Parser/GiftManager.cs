@@ -2,7 +2,7 @@
 using AngleSharp.Html.Parser;
 using NLog;
 
-namespace Moahk;
+namespace Moahk.Parser;
 
 public class GiftManager
 {

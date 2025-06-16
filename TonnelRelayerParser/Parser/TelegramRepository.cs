@@ -3,7 +3,7 @@ using NLog;
 using TL;
 using WTelegram;
 
-namespace Moahk;
+namespace Moahk.Parser;
 
 public class TelegramRepository : IDisposable
 {

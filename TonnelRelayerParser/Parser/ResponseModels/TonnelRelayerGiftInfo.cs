@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Moahk.ResponseModels;
+namespace Moahk.Parser.ResponseModels;
 
 public class TonnelRelayerGiftInfo
 {

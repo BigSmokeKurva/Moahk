@@ -1,0 +1,9 @@
+﻿namespace Moahk.Data.Enums;
+
+[Flags]
+public enum Status : long
+{
+    None = 0L,
+    WritingPriceRange = 1L << 0,
+    WritingProfitPercent = 1L << 1
+}

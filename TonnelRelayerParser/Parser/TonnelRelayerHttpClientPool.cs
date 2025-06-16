@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Runtime.Caching;
 using NLog;
 
-namespace Moahk;
+namespace Moahk.Parser;
 
 public class TonnelRelayerHttpClientPool : IDisposable
 {
@@ -120,12 +120,14 @@ public class TonnelRelayerHttpClientPool : IDisposable
                         $"Попытка {i + 1}: Ошибка при POST запросе к {url}. Код ответа: {(int)response.StatusCode}");
                     continue;
                 }
+
                 return response;
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Попытка {i + 1}: Ошибка при POST запросе к {url}");
             }
+
         throw new Exception($"Не удалось выполнить POST запрос к {url} после 3 попыток");
     }
 }
