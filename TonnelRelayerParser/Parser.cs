@@ -12,48 +12,19 @@ namespace Moahk;
 public class Parser : IDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private static readonly WebProxy[] PageProxies = LoadProxies("page_proxies.txt");
-    private static readonly WebProxy[] ActivityProxies = LoadProxies("activity_proxies.txt");
-    private readonly HttpClient[] _activityClients;
     private readonly MemoryCache _cache = new("TonnelRelayerParserCache");
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     private readonly Channel<(GiftInfo, TonnelRelayerGiftInfo)> _giftInfos =
         Channel.CreateBounded<(GiftInfo, TonnelRelayerGiftInfo)>(1000);
 
-    private readonly HttpClient[] _pageClients;
     private readonly HttpClient _portalsClient;
 
     private readonly TelegramBot _telegramBot = new();
-
-    static Parser()
-    {
-        Logger.Info($"Загружено {PageProxies.Length} page-прокси и {ActivityProxies.Length} activity-прокси.");
-    }
+    private readonly TonnelRelayerHttpClientPool _tonnelRelayerHttpClientPool = new();
 
     public Parser()
     {
-        string[][] headers =
-        [
-            ["accept", "*/*"],
-            ["accept-language", "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7"],
-            ["origin", "https://marketplace.tonnel.network"],
-            ["priority", "u=1, i"],
-            ["referer", "https://marketplace.tonnel.network/"],
-            [
-                "sec-ch-ua",
-                "\"Microsoft Edge\";v=\"136\", \"Microsoft Edge WebView2\";v=\"136\", \"Not.A/Brand\";v=\"99\", \"Chromium\";v=\"136\""
-            ],
-            ["sec-ch-ua-mobile", "?0"],
-            ["sec-ch-ua-platform", "\"Windows\""],
-            ["sec-fetch-dest", "empty"],
-            ["sec-fetch-mode", "cors"],
-            ["sec-fetch-site", "same-site"],
-            [
-                "user-agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
-            ]
-        ];
         string[][] portalsHeaders =
         [
             ["accept", "application/json, text/plain, */*"],
@@ -74,15 +45,13 @@ public class Parser : IDisposable
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
             ]
         ];
-        _pageClients = PageProxies.Select(x => CreateClient(x, headers)).ToArray();
-        _activityClients = ActivityProxies.Select(x => CreateClient(x, headers)).ToArray();
         _portalsClient = new HttpClient();
         AddHeaders(_portalsClient, portalsHeaders);
     }
 
     public void Dispose()
     {
-        foreach (var client in _pageClients.Concat(_activityClients)) client.Dispose();
+        _tonnelRelayerHttpClientPool.Dispose();
         _portalsClient.Dispose();
         _cancellationTokenSource.Cancel();
         GC.SuppressFinalize(this);
@@ -132,10 +101,17 @@ public class Parser : IDisposable
     public async Task Start()
     {
         _ = RunTonnelGetMarketGiftsLoop();
-        _ = Task.WhenAll(_activityClients.Select(TonnelActivityThread));
+        var activityThreads = new List<Task>();
+        for (var i = 0; i < _tonnelRelayerHttpClientPool.Size - 1; i++)
+        {
+            var activityThread = TonnelActivityThread();
+            activityThreads.Add(activityThread);
+        }
+
+        _ = Task.WhenAll(activityThreads);
     }
 
-    private async Task TonnelActivityThread(HttpClient client)
+    private async Task TonnelActivityThread()
     {
         while (!_cancellationTokenSource.IsCancellationRequested)
         {
@@ -156,7 +132,7 @@ public class Parser : IDisposable
                     continue;
                 }
 
-                using var response = await client.PostAsJsonAsync(
+                using var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync(
                     "https://gifts2.tonnel.network/api/saleHistory",
                     new
                     {
@@ -342,14 +318,14 @@ public class Parser : IDisposable
 
     private async Task TonnelGetMarketGifts()
     {
-        await Task.WhenAll(_pageClients.Select((client, idx) => TonnelGetMarketGiftPage(client, idx + 1)));
+        await TonnelGetMarketGiftPage(1);
     }
 
-    private async Task TonnelGetMarketGiftPage(HttpClient client, int page)
+    private async Task TonnelGetMarketGiftPage(int page)
     {
         try
         {
-            using var response = await client.PostAsJsonAsync("https://gifts2.tonnel.network/api/pageGifts", new
+            using var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync("https://gifts2.tonnel.network/api/pageGifts", new
             {
                 page,
                 limit = 30,
