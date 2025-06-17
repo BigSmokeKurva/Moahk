@@ -152,7 +152,7 @@ public class Parser : IDisposable
                 };
                 var tonnelCurrentPrice = giftInfo.Item2.Price + giftInfo.Item2.Price * 0.1;
                 var portalsCurrentPrice = portalsGift?.Price != null
-                    ? double.Parse(portalsGift.Price, NumberStyles.Any)
+                    ? double.Parse(portalsGift.Price.Replace('.', ','), NumberStyles.Any)
                     : double.MaxValue;
                 (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string
                     TgUrl, string BotUrl, string? SiteUrl, string botName, bool isSold) gift =
@@ -254,7 +254,7 @@ public class Parser : IDisposable
         var percentDiff = (percentile - gift.Price) / percentile * 100.0;
         if (percentDiff > 0)
             await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, percentDiff, gift.isSold, gift.Activity,
-                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Peak);
+                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Percentile75);
     }
 
     private async Task MathSecondFloor(
@@ -263,7 +263,7 @@ public class Parser : IDisposable
     {
         if (tonnelSearchResults.Length < 2)
         {
-            Logger.Warn($"Недостаточно результатов для второго этажа: {tonnelSearchResults.Length}");
+            Logger.Warn($"Недостаточно результатов для second floor: {tonnelSearchResults.Length}");
             return;
         }
 
@@ -273,7 +273,7 @@ public class Parser : IDisposable
         var percentDiff = (secondFloor.Price - gift.Price) / secondFloor.Price * 100.0;
         if (percentDiff > 0)
             await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.isSold,
-                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Peak);
+                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.SecondFloor);
     }
 
 //     private async Task<bool> ProcessGift(TonnelRelayerHistoryGiftInfo[] historyData, string cacheKey,

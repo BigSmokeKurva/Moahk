@@ -21,15 +21,16 @@ public class TonnelRelayerHttpClientPool : IDisposable
             ["origin"] = "https://marketplace.tonnel.network",
             ["priority"] = "u=1, i",
             ["referer"] = "https://marketplace.tonnel.network/",
+            ["referrer-policy"] = "strict-origin-when-cross-origin",
             ["sec-ch-ua"] =
-                "\"Microsoft Edge\";v=\"136\", \"Microsoft Edge WebView2\";v=\"136\", \"Not.A/Brand\";v=\"99\", \"Chromium\";v=\"136\"",
+                "\"Microsoft Edge WebView2\";v=\"137\", \"Microsoft Edge\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Chromium\";v=\"137\"",
             ["sec-ch-ua-mobile"] = "?0",
             ["sec-ch-ua-platform"] = "\"Windows\"",
             ["sec-fetch-dest"] = "empty",
             ["sec-fetch-mode"] = "cors",
             ["sec-fetch-site"] = "same-site",
             ["user-agent"] =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0"
         };
         var proxies = LoadProxies();
         if (proxies.Length == 0)
@@ -40,11 +41,12 @@ public class TonnelRelayerHttpClientPool : IDisposable
             {
                 Proxy = proxy,
                 UseProxy = true,
-                AllowAutoRedirect = false
+                UseCookies = false
             };
             var client = new HttpClient(handler);
-            foreach (var header in headers)
-                client.DefaultRequestHeaders.Add(header.Key, header.Value);
+            foreach (var header in headers) client.DefaultRequestHeaders.Add(header.Key, header.Value);
+            client.DefaultRequestHeaders.ConnectionClose = true;
+
             return (client, index.ToString());
         }).ToArray();
         Size = _httpClients.Length;

@@ -412,19 +412,20 @@ public class TelegramBot
     {
         await using var dbContext = new ApplicationDbContext();
         var users = await dbContext.Users
+            .AsNoTracking()
             .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                        x.PriceMin <= price && x.PriceMax >= price && x.ProfitPercent >= percentDiff)
+                        x.PriceMin <= price && x.PriceMax >= price && x.ProfitPercent <= percentDiff)
             .ToArrayAsync();
         var msg = $"""
-                   🎁  ({tgUrl})**{name} | {model}** 🎨
+                   [🎁]({tgUrl})  *{name} | {model}* 🎨
 
                    🔀{botName.ToUpper()}
 
                    ━━━━━━━━━━━━━━━━━━━ 
-                   💲 **Цена**: {price:F2} TON
-                   💹 **Перспектива**: +{percentDiff}% (от той цены по которой считалось активити)  
-                   ✅ **Состояние**: {(isSold ? "Грязный" : "Чистый")}  
-                   🔥 **Активность**: {activity switch
+                   💲 *Цена*: {price:F2} TON
+                   💹 *Перспектива*: +{percentDiff:F2}%
+                   ✅ *Состояние*: {(isSold ? "Грязный" : "Чистый")}  
+                   🔥 *Активность*: {activity switch
                    {
                        Activity.Low => "Низкая",
                        Activity.Medium => "Средняя",
