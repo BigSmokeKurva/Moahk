@@ -15,10 +15,11 @@ internal static class Program
 
     private static async Task Main()
     {
+        Microsoft.Playwright.Program.Main(["install", "chromium"]);
         await ApplicationDbContextInitialiser.InitialiseAsync();
         using var telegramRepository = new TelegramRepository();
         await telegramRepository.Start();
-        using var parser = new Parser.Parser();
+        await using var parser = new Parser.Parser();
         await parser.Start();
         // var bot = new TelegramBot();
         Console.ReadKey();

@@ -11,7 +11,7 @@ using NLog;
 
 namespace Moahk.Parser;
 
-public class Parser : IDisposable
+public class Parser : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly MemoryCache _cache = new("TonnelRelayerParserCache");
@@ -51,11 +51,11 @@ public class Parser : IDisposable
         AddHeaders(_portalsClient, portalsHeaders);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _tonnelRelayerHttpClientPool.Dispose();
+        await _tonnelRelayerHttpClientPool.DisposeAsync();
         _portalsClient.Dispose();
-        _cancellationTokenSource.Cancel();
+        await _cancellationTokenSource.CancelAsync();
         GC.SuppressFinalize(this);
     }
 
@@ -102,6 +102,7 @@ public class Parser : IDisposable
 
     public async Task Start()
     {
+        await _tonnelRelayerHttpClientPool.Start();
         _ = RunTonnelGetMarketGiftsLoop();
         var activityThreads = new List<Task>();
         for (var i = 0; i < _tonnelRelayerHttpClientPool.Size - 1; i++)
@@ -185,7 +186,7 @@ public class Parser : IDisposable
 
     private async Task<TonnelRelayerHistoryGiftInfo[]?> GetTonnelActivity((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
     {
-        using var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync(
+        var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelRelayerHistoryGiftInfo[], object>(
             "https://gifts3.tonnel.network/api/saleHistory",
             new
             {
@@ -201,18 +202,13 @@ public class Parser : IDisposable
                 },
                 sort = new { timestamp = -1, gift_id = -1 }
             });
-        if (!response.IsSuccessStatusCode)
-            throw new Exception(
-                $"Ошибка при получении истории подарков: {response.StatusCode}");
-        var historyData = await response.Content.ReadFromJsonAsync<TonnelRelayerHistoryGiftInfo[]>();
-        if (historyData != null) return historyData;
-        Logger.Warn($"Не найдено истории для подарка {giftInfo.Item1.Id}");
-        return null;
+
+        return response;
     }
 
     private async Task<TonnelSearch[]?> GetTonnelSearchResults((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
     {
-        using var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync(
+        var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelSearch[], object>(
             "https://gifts3.tonnel.network/api/pageGifts", new
             {
                 page = 1,
@@ -227,9 +223,7 @@ public class Parser : IDisposable
                 user_auth =
                     TelegramRepository.TonnelRelayerDecodedTgWebAppData
             });
-        if (!response.IsSuccessStatusCode)
-            throw new Exception($"Ошибка при поиске подарков: {response.StatusCode}");
-        return await response.Content.ReadFromJsonAsync<TonnelSearch[]>();
+        return response;
     }
 
     private async Task MathPeak(
@@ -452,7 +446,7 @@ public class Parser : IDisposable
     {
         try
         {
-            using var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync(
+            var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelRelayerGiftInfo[], object>(
                 "https://gifts3.tonnel.network/api/pageGifts", new
                 {
                     page,
@@ -463,12 +457,8 @@ public class Parser : IDisposable
                     price_range = (object?)null,
                     user_auth = TelegramRepository.TonnelRelayerDecodedTgWebAppData
                 });
-            if (!response.IsSuccessStatusCode)
-                throw new Exception(
-                    response.StatusCode.ToString());
-            var data = await response.Content.ReadFromJsonAsync<TonnelRelayerGiftInfo[]>();
-            if (data == null || data.Length == 0) throw new Exception("Не удалось получить данные о подарках.");
-            foreach (var tonnelRelayerGiftInfo in data)
+            if (response == null || response.Length == 0) throw new Exception("Не удалось получить данные о подарках.");
+            foreach (var tonnelRelayerGiftInfo in response)
                 try
                 {
                     var telegramGiftId = string.Concat(tonnelRelayerGiftInfo.Name?.Where(char.IsLetter) ?? string.Empty)

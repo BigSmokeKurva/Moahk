@@ -1,69 +1,235 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.Caching;
+using System.Text.Json;
+using Microsoft.Playwright;
+using Moahk.Parser.ResponseModels;
 using NLog;
+using Titanium.Web.Proxy;
+using Titanium.Web.Proxy.Models;
 
 namespace Moahk.Parser;
 
-public class TonnelRelayerHttpClientPool : IDisposable
+public class BrowserContextItem(
+    IBrowserContext context,
+    IPage page,
+    ProxyServer proxyServer,
+    string id,
+    bool isAvailable = true)
+{
+    public IBrowserContext Context { get; } = context;
+    public IPage Page { get; } = page;
+    public ProxyServer ProxyServer { get; } = proxyServer;
+    public string Id { get; } = id;
+    public bool IsAvailable { get; set; } = isAvailable;
+}
+
+public class TonnelRelayerHttpClientPool : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    private readonly string _2CaptchaApi = ConfigurationManager.GetString("2CaptchaApi")
+                                           ?? throw new Exception("Не задан 2CaptchaApi в конфигурации");
+
     private readonly MemoryCache _cache = new("TonnelRelayerHttpClientPool");
-    private readonly (HttpClient Client, string Id)[] _httpClients;
-    public readonly int Size;
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private readonly HttpClient _httpClient = new();
+    private IBrowser? _browser;
+    private BrowserContextItem[]? _browserContexts;
+    private IPlaywright? _playwright;
 
-    public TonnelRelayerHttpClientPool()
+    private CancellationToken StoppingToken => _cancellationTokenSource.Token;
+
+    public int Size { get; private set; }
+
+    public async ValueTask DisposeAsync()
     {
-        var headers = new Dictionary<string, string>
-        {
-            ["accept"] = "*/*",
-            ["accept-language"] = "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7",
-            ["origin"] = "https://marketplace.tonnel.network",
-            ["priority"] = "u=1, i",
-            ["referer"] = "https://marketplace.tonnel.network/",
-            ["referrer-policy"] = "strict-origin-when-cross-origin",
-            ["sec-ch-ua"] =
-                "\"Microsoft Edge WebView2\";v=\"137\", \"Microsoft Edge\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Chromium\";v=\"137\"",
-            ["sec-ch-ua-mobile"] = "?0",
-            ["sec-ch-ua-platform"] = "\"Windows\"",
-            ["sec-fetch-dest"] = "empty",
-            ["sec-fetch-mode"] = "cors",
-            ["sec-fetch-site"] = "same-site",
-            ["user-agent"] =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0"
-        };
-        var proxies = LoadProxies();
-        if (proxies.Length == 0)
-            throw new Exception("Нет доступных прокси");
-        _httpClients = proxies.Select((proxy, index) =>
-        {
-            var handler = new HttpClientHandler
+        await _cancellationTokenSource.CancelAsync();
+        if (_browserContexts != null)
+            foreach (var browserContext in _browserContexts)
             {
-                Proxy = proxy,
-                UseProxy = true,
-                UseCookies = false
-            };
-            var client = new HttpClient(handler);
-            foreach (var header in headers) client.DefaultRequestHeaders.Add(header.Key, header.Value);
-            client.DefaultRequestHeaders.ConnectionClose = true;
+                await browserContext.Page.CloseAsync();
+                await browserContext.Context.CloseAsync();
+                browserContext.ProxyServer.Stop();
+            }
 
-            return (client, index.ToString());
-        }).ToArray();
-        Size = _httpClients.Length;
-        Logger.Info($"Создан пул HTTP клиентов с {proxies.Length} прокси");
-    }
+        if (_browser is not null)
+        {
+            await _browser.CloseAsync();
+            await _browser.DisposeAsync();
+        }
 
-    public void Dispose()
-    {
-        foreach (var httpClient in _httpClients) httpClient.Client.Dispose();
+        _playwright?.Dispose();
 
         GC.SuppressFinalize(this);
     }
 
-    private static WebProxy[] LoadProxies()
+    public async Task Start()
+    {
+        if (_playwright is not null)
+            throw new Exception("Playwright уже инициализирован");
+        _playwright = await Playwright.CreateAsync();
+        var proxies = LoadProxies();
+        if (proxies.Length == 0)
+            throw new Exception("Нет доступных прокси");
+
+        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = false,
+            Args =
+            [
+                "--disable-blink-features=AutomationControlled",
+                "--mute-audio",
+                "--window-size=1920,1080",
+                "--no-sandbox",
+                "--disable-search-engine-choice-screen",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--no-zygote",
+                "--disable-gpu-sandbox",
+                "--disable-software-rasterizer",
+                "--ignore-certificate-errors",
+                "--ignore-ssl-errors",
+                "--disable-web-security",
+                "--headless=new",
+                "--proxy-server=http://localhost:80"
+            ]
+        });
+        var userAgent = ConfigurationManager.GetString("UserAgent");
+        while (TelegramRepository.TonnelRelayerTgWebAppData is null && !StoppingToken.IsCancellationRequested)
+            await Task.Delay(200, StoppingToken);
+        _browserContexts = await Task.WhenAll(proxies.Select(async (proxy, index) =>
+        {
+            ProxyServer proxyServer = new();
+            var explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Parse("127.0.0.1"), 45000 + index, false);
+            proxyServer.CertificateManager.CertificateValidDays = 365;
+            if (proxyServer.CertificateManager.RootCertificate == null)
+                await proxyServer.CertificateManager.LoadOrCreateRootCertificateAsync(cancellationToken: StoppingToken);
+            proxyServer.CertificateManager.TrustRootCertificate(true);
+            proxyServer.AddEndPoint(explicitEndPoint);
+            var proxUri = new Uri(proxy.Url);
+            var externalProxy = new ExternalProxy
+            {
+                HostName = proxUri.Host,
+                Port = proxUri.Port,
+                UserName = proxy.Username,
+                Password = proxy.Password,
+                ProxyType = proxUri.Scheme == "http" ? ExternalProxyType.Http : ExternalProxyType.Socks5
+            };
+            proxyServer.UpStreamHttpProxy = externalProxy;
+            proxyServer.UpStreamHttpsProxy = externalProxy;
+            await proxyServer.StartAsync(cancellationToken: StoppingToken);
+            var proxyServerUrl = $"http://{explicitEndPoint.IpAddress}:{explicitEndPoint.Port}";
+            var contextOptions = new BrowserNewContextOptions
+            {
+                Proxy = new Proxy
+                {
+                    Server = proxyServerUrl
+                },
+                IgnoreHTTPSErrors = true,
+                UserAgent = userAgent
+            };
+            var context = await _browser.NewContextAsync(contextOptions);
+            var page = await context.NewPageAsync();
+            await page.AddInitScriptAsync(
+                """
+                console.clear = () => console.log('Console was cleared')
+                const i = setInterval(() => {
+                    if (window.turnstile) {
+                        clearInterval(i)
+                        window.turnstile.render = (a, b) => {
+                            let params = {
+                                sitekey: b.sitekey,
+                                pageurl: window.location.href,
+                                data: b.cData,
+                                pagedata: b.chlPageData,
+                                action: b.action,
+                                userAgent: navigator.userAgent
+                            }
+                            console.log('intercepted-params:' + JSON.stringify(params))
+                            window.cfCallback = b.callback
+                            return
+                        }
+                    }
+                }, 50)
+                """);
+            var browserContextItem = new BrowserContextItem(context, page, proxyServer, index.ToString());
+            page.Console += async (_, msg) =>
+            {
+                var txt = msg.Text;
+                if (!txt.Contains("intercepted-params:"))
+                    return;
+                txt = txt.Replace("intercepted-params:", string.Empty);
+                browserContextItem.IsAvailable = false;
+                var json = JsonSerializer.Deserialize<Dictionary<string, string>>(txt)!;
+                try
+                {
+                    var token = await SolveTurnstile(json);
+                    await page.EvaluateAsync($"cfCallback('{token}')");
+                }
+                catch
+                {
+                    Logger.Error($"Ошибка при решении Turnstile: {txt}");
+                }
+                finally
+                {
+                    browserContextItem.IsAvailable = true;
+                }
+            };
+            await page.GotoAsync(
+                $"https://marketplace.tonnel.network/#tgWebAppData={TelegramRepository.TonnelRelayerTgWebAppData}");
+            return browserContextItem;
+        }));
+        Size = proxies.Length;
+        Logger.Info($"Создан пул браузеров с {proxies.Length} прокси");
+    }
+
+    private async Task<string> SolveTurnstile(Dictionary<string, string> data)
+    {
+        var content = new
+        {
+            key = _2CaptchaApi,
+            sitekey = data["sitekey"],
+            pageurl = data["pageurl"],
+            pagedata = data["pagedata"],
+            method = "turnstile",
+            data = data["data"],
+            action = data["action"],
+            useragent = data["userAgent"],
+            json = "1"
+        };
+        var response = await _httpClient.PostAsJsonAsync("https://2captcha.com/in.php", content,
+            StoppingToken);
+
+        var taskContent =
+            await response.Content.ReadFromJsonAsync<RuCaptchaCreateTaskResponse>(StoppingToken);
+        if (taskContent!.Status != 1)
+            throw new Exception($"Ошибка при создании задачи: {taskContent.Request}");
+        while (!StoppingToken.IsCancellationRequested)
+        {
+            await Task.Delay(2000, StoppingToken);
+            response = await _httpClient.GetAsync(
+                $"http://2captcha.com/res.php?key={_2CaptchaApi}&action=get&json=1&id={taskContent.Request}",
+                StoppingToken);
+            var taskResultContent = await response.Content.ReadFromJsonAsync<RuCaptchaResultTaskResponse>(
+                StoppingToken);
+
+            if (taskResultContent!.Request == "CAPCHA_NOT_READY")
+                continue;
+            if (taskResultContent.Request != "CAPCHA_NOT_READY" && taskResultContent.Status == 1)
+                return taskResultContent.Request!;
+            throw new Exception(
+                $"Ошибка при получении решения задачи: {taskResultContent.Request}");
+        }
+
+        throw new OperationCanceledException("Задача была отменена");
+    }
+
+
+    private static (string Url, string Username, string Password)[] LoadProxies()
     {
         const string fileName = "proxies.txt";
-        var proxies = new List<WebProxy>();
+        var proxies = new List<(string Url, string Username, string Password)>();
         foreach (var line in File.ReadAllLines(fileName))
         {
             var parts = line.Split(':');
@@ -75,8 +241,8 @@ public class TonnelRelayerHttpClientPool : IDisposable
 
             try
             {
-                var proxyUri = new Uri($"{parts[0]}://{parts[1]}:{parts[2]}");
-                proxies.Add(new WebProxy(proxyUri) { Credentials = new NetworkCredential(parts[3], parts[4]) });
+                var proxyUrl = $"{parts[0]}://{parts[1]}:{parts[2]}";
+                proxies.Add((proxyUrl, parts[3], parts[4]));
             }
             catch (Exception ex)
             {
@@ -89,46 +255,91 @@ public class TonnelRelayerHttpClientPool : IDisposable
         return proxies.ToArray();
     }
 
-    private async Task<HttpClient> GetHttpClient()
+    private async Task<BrowserContextItem> GetContext()
     {
         while (true)
         {
-            HttpClient? client = null;
+            BrowserContextItem? browserContextItem;
             lock (this)
             {
-                var clientTuple = _httpClients.FirstOrDefault(c => !_cache.Contains(c.Id));
-                if (clientTuple.Client != null)
+                browserContextItem = _browserContexts!.FirstOrDefault(c => c.IsAvailable && !_cache.Contains(c.Id));
+                if (browserContextItem?.Context != null)
                 {
-                    client = clientTuple.Client;
-                    _cache.Add(clientTuple.Id, 0, DateTimeOffset.UtcNow.AddSeconds(1.5));
+                    _cache.Add(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddSeconds(1.5));
+                    browserContextItem.IsAvailable = false;
                 }
             }
 
-            if (client != null) return client;
-            await Task.Delay(100);
+            if (browserContextItem != null) return browserContextItem;
+            await Task.Delay(100, StoppingToken);
         }
     }
 
-    public async Task<HttpResponseMessage> PostAsJsonAsync<T>(string url, T postData)
+    public async Task<TI?> PostAsJsonAsync<TI, T>(string url, T postData)
     {
-        for (var i = 0; i < 3; i++)
+        var jsonString = JsonSerializer.Serialize(postData);
+        for (var i = 0; i < 5; i++)
+        {
+            var clientTuple = await GetContext();
             try
             {
-                var client = await GetHttpClient();
-                var response = await client.PostAsJsonAsync(url, postData);
-                if (!response.IsSuccessStatusCode)
+                var script = """
+                             async ({url, jsonString}) => {
+                               var r = await fetch(url, {
+                                 "headers": {
+                                   "accept": "*/*",
+                                   "accept-language": "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7",
+                                   "content-type": "application/json",
+                                   "priority": "u=1, i",
+                                   "sec-ch-ua": "\"Microsoft Edge WebView2\";v=\"137\", \"Microsoft Edge\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Chromium\";v=\"137\"",
+                                   "sec-ch-ua-mobile": "?0",
+                                   "sec-ch-ua-platform": "\"Windows\"",
+                                   "sec-fetch-dest": "empty",
+                                   "sec-fetch-mode": "cors",
+                                   "sec-fetch-site": "same-site"
+                                 },
+                                 "referrer": "https://marketplace.tonnel.network/",
+                                 "referrerPolicy": "strict-origin-when-cross-origin",
+                                 "body": jsonString,
+                                 "method": "POST",
+                                 "mode": "cors",
+                                 "credentials": "omit"
+                               });
+                               return JSON.stringify({
+                                 status: r.status,
+                                 text: await r.text(),
+                               })
+                             }
+                             """;
+
+                var response = await clientTuple.Page.EvaluateAsync<string>(script, new
                 {
-                    Logger.Warn(
-                        $"Попытка {i + 1}: Ошибка при POST запросе к {url}. Код ответа: {(int)response.StatusCode}");
+                    url,
+                    jsonString
+                });
+                var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response)!;
+                var status = ((JsonElement)result["status"]).GetInt32();
+                if (status == 403)
+                {
+                    await clientTuple.Page.ReloadAsync();
                     continue;
                 }
 
-                return response;
+                if (status != 200)
+                    throw new Exception("Ошибка при выполнении запроса: " + result["text"]);
+
+                return JsonSerializer.Deserialize<TI>(((JsonElement)result["text"]).GetString() ??
+                                                      throw new InvalidOperationException());
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Попытка {i + 1}: Ошибка при POST запросе к {url}");
             }
+            finally
+            {
+                clientTuple.IsAvailable = true;
+            }
+        }
 
         throw new Exception($"Не удалось выполнить POST запрос к {url} после 3 попыток");
     }
