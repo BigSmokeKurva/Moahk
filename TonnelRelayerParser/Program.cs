@@ -21,7 +21,6 @@ internal static class Program
         await telegramRepository.Start();
         await using var parser = new Parser.Parser();
         await parser.Start();
-        // var bot = new TelegramBot();
-        Console.ReadKey();
+        await Task.Delay(Timeout.Infinite);
     }
 }

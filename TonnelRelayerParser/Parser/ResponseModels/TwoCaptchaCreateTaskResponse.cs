@@ -2,9 +2,9 @@
 
 namespace Moahk.Parser.ResponseModels;
 
-internal class RuCaptchaResultTaskResponse
+internal class TwoCaptchaCreateTaskResponse
 {
     [JsonPropertyName("status")] public int Status { get; set; }
 
-    [JsonPropertyName("request")] public string? Request { get; set; }
+    [JsonPropertyName("request")] public string Request { get; set; }
 }

@@ -202,7 +202,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             StoppingToken);
 
         var taskContent =
-            await response.Content.ReadFromJsonAsync<RuCaptchaCreateTaskResponse>(StoppingToken);
+            await response.Content.ReadFromJsonAsync<TwoCaptchaCreateTaskResponse>(StoppingToken);
         if (taskContent!.Status != 1)
             throw new Exception($"Ошибка при создании задачи: {taskContent.Request}");
         while (!StoppingToken.IsCancellationRequested)
@@ -211,7 +211,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             response = await _httpClient.GetAsync(
                 $"http://2captcha.com/res.php?key={_2CaptchaApi}&action=get&json=1&id={taskContent.Request}",
                 StoppingToken);
-            var taskResultContent = await response.Content.ReadFromJsonAsync<RuCaptchaResultTaskResponse>(
+            var taskResultContent = await response.Content.ReadFromJsonAsync<TwoCaptchaResultTaskResponse>(
                 StoppingToken);
 
             if (taskResultContent!.Request == "CAPCHA_NOT_READY")
@@ -280,7 +280,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
         var jsonString = JsonSerializer.Serialize(postData);
         for (var i = 0; i < 5; i++)
         {
-            var clientTuple = await GetContext();
+            var browserContextItem = await GetContext();
             try
             {
                 var script = """
@@ -312,7 +312,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                              }
                              """;
 
-                var response = await clientTuple.Page.EvaluateAsync<string>(script, new
+                var response = await browserContextItem.Page.EvaluateAsync<string>(script, new
                 {
                     url,
                     jsonString
@@ -321,7 +321,8 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 var status = ((JsonElement)result["status"]).GetInt32();
                 if (status == 403)
                 {
-                    await clientTuple.Page.ReloadAsync();
+                    await browserContextItem.Page.GotoAsync(
+                        $"https://marketplace.tonnel.network/#tgWebAppData={TelegramRepository.TonnelRelayerTgWebAppData}");
                     continue;
                 }
 
@@ -337,7 +338,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             }
             finally
             {
-                clientTuple.IsAvailable = true;
+                browserContextItem.IsAvailable = true;
             }
         }
 

@@ -1,5 +1,4 @@
 ﻿using System.Globalization;
-using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.Caching;
@@ -59,45 +58,10 @@ public class Parser : IAsyncDisposable
         GC.SuppressFinalize(this);
     }
 
-    private static HttpClient CreateClient(WebProxy proxy, string[][] headers)
-    {
-        var client = new HttpClient(new HttpClientHandler { Proxy = proxy });
-        AddHeaders(client, headers);
-        return client;
-    }
-
     private static void AddHeaders(HttpClient client, string[][] headers)
     {
         foreach (var h in headers)
             client.DefaultRequestHeaders.Add(h[0], h[1]);
-    }
-
-    private static WebProxy[] LoadProxies(string fileName)
-    {
-        var proxies = new List<WebProxy>();
-        foreach (var line in File.ReadAllLines(fileName))
-        {
-            var parts = line.Split(':');
-            if (parts.Length != 5)
-            {
-                Logger.Warn($"Неверный формат прокси: {fileName} {line}");
-                continue;
-            }
-
-            try
-            {
-                var proxyUri = new Uri($"{parts[0]}://{parts[1]}:{parts[2]}");
-                proxies.Add(new WebProxy(proxyUri) { Credentials = new NetworkCredential(parts[3], parts[4]) });
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Ошибка парсинга прокси: {fileName} {line}. {ex.Message}");
-            }
-        }
-
-        if (proxies.Count == 0)
-            throw new Exception($"Не удалось загрузить ни одного валидного прокси из {fileName}");
-        return proxies.ToArray();
     }
 
     public async Task Start()
