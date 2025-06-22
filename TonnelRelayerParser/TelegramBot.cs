@@ -53,7 +53,7 @@ public class TelegramBot : IDisposable
     private async Task OnMessage(Message msg, UpdateType type)
     {
         await using var dbContext = new ApplicationDbContext();
-        var user = await dbContext.AddUserAsync(msg.From?.Id ?? throw new Exception("UserId is null"));
+        var addUserResult = await dbContext.AddUserAsync(msg.From?.Id ?? throw new Exception("UserId is null"));
         if (msg.Text is not { } text || msg.Chat.Type != ChatType.Private)
             return;
         if (text.StartsWith('/'))
@@ -66,11 +66,12 @@ public class TelegramBot : IDisposable
                     command = command[..at];
                 else
                     return;
-            await OnCommand(command, text[space..].TrimStart(), msg, dbContext, user);
+            await OnCommand(command, text[space..].TrimStart(), msg, dbContext, addUserResult.user,
+                addUserResult.isNew);
         }
         else
         {
-            await OnTextMessage(msg, dbContext, user);
+            await OnTextMessage(msg, dbContext, addUserResult.user);
         }
     }
 
@@ -78,8 +79,24 @@ public class TelegramBot : IDisposable
     {
         switch (msg.Text)
         {
-            case "Главное меню":
-                await StartCommand(msg, dbContext, user, false);
+            case "💳 Продлить подписку":
+            case "💳 Выбрать тариф":
+                await SelectTariffTextCommand(msg, dbContext, user);
+                break;
+            case "⚙️ Настройки фильтров":
+                await FiltersTextCommand(msg, dbContext, user);
+                break;
+            case "▶️ Запустить поиск":
+                await StartTextCommand(msg, dbContext, user);
+                break;
+            case "⏹️ Остановить поиск":
+                await StopTextCommand(msg, dbContext, user);
+                break;
+            case "❓ FAQ":
+                await FaqTextCommand(msg, dbContext, user);
+                break;
+            case "📊 Мой статус":
+                await StatusTextCommand(msg, dbContext, user);
                 break;
             case not null when user.Status == Status.WritingPriceRange:
                 await PriceRangeSetValue(msg, dbContext, user);
@@ -91,12 +108,12 @@ public class TelegramBot : IDisposable
     }
 
     private async Task OnCommand(string command, string args, Message msg, ApplicationDbContext dbContext,
-        Data.Entities.User user)
+        Data.Entities.User user, bool isNew)
     {
         switch (command)
         {
             case "/start":
-                await StartCommand(msg, dbContext, user);
+                await StartCommand(msg, dbContext, user, isNew = isNew);
                 break;
             case "/find" when Admins.Contains(msg.From!.Id):
                 await AdminFindCommand(msg, args, dbContext, user);
@@ -108,30 +125,72 @@ public class TelegramBot : IDisposable
     }
 
     private async Task StartCommand(Message msg, ApplicationDbContext dbContext, Data.Entities.User user,
-        bool sendMenu = true)
+        bool isNew = false)
     {
         user.Status = Status.None;
         await dbContext.SaveChangesAsync();
-        if (sendMenu)
-            await _botClient.SendDice(msg.From!.Id, replyMarkup: new ReplyKeyboardMarkup([
-                [new KeyboardButton("Главное меню")]
-            ]) { ResizeKeyboard = true });
+        var (keyboard, msgText) = GetMainMenuMessage(user, isNew);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
+    }
 
-        var licenseActive = DateTimeOffset.UtcNow < user.License;
-        var buttons = new List<List<InlineKeyboardButton>>
+    private (ReplyKeyboardMarkup keyboard, string msgText) GetMainMenuMessage(Data.Entities.User user, bool isNew)
+    {
+        List<List<KeyboardButton>> buttons;
+        string msgText;
+        if (isNew)
         {
-            new() { InlineKeyboardButton.WithCallbackData("Продлить", "renew_license") }
-        };
-        if (licenseActive)
-            buttons.Add([
-                InlineKeyboardButton.WithCallbackData("Запуск и остановка", "start_stop"),
-                InlineKeyboardButton.WithCallbackData("Настройка фильтров", "filters")
-            ]);
-        var keyboard = new InlineKeyboardMarkup(buttons);
-        await _botClient.SendMessage(msg.From!.Id, $"""
-                                                    Приветствие
-                                                    {(licenseActive ? $"Лицензия: {user.License:yyyy-MM-dd HH:mm} UTC" : "Нет активной лицензии")}
-                                                    """, replyMarkup: keyboard);
+            buttons =
+            [
+                [
+                    "💳 Выбрать тариф",
+                    "⚙️ Настройки фильтров"
+                ],
+                [
+                    "❓ FAQ",
+                    "📊 Мой статус"
+                ]
+            ];
+            msgText = """
+                      🎁 Добро пожаловать в Gift_ flipper_Bot!
+
+                      Я помогу вам находить самые выгодные подарки в Telegram маркетплейсах Tonnel и Portals по вашим критериям.
+
+                      🔍 Что я умею:
+                      - Постоянно сканирую маркеты и ищу выгодные для покупки предложения
+                      - Понимаю "грязный" подарок или нет
+                      - Анализирую активность и цены продаж каждого конкретного вида подарка за последние 2 недели
+                      - Нахожу подарки с высокой перспективой для перепродажи
+                      - Фильтрую по цене и проценту выгоды
+                      - Отправляю только те предложения, которые соответствуют вашим настройкам
+
+                      Для начала работы выберите тариф и настройте фильтры под себя!
+                      """;
+        }
+        else
+        {
+            buttons =
+            [
+                [
+                    user.IsStarted ? "⏹️ Остановить поиск" : "▶️ Запустить поиск"
+                ],
+                [
+                    "⚙️ Настройки фильтров",
+                    "💳 Продлить подписку"
+                ],
+                [
+                    "❓ FAQ",
+                    "📊 Мой статус"
+                ]
+            ];
+            msgText = $"""
+                       🎯 Главное меню
+
+                       Статус подписки: {(user.License >= DateTimeOffset.UtcNow ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Подписка неактивна")}
+                       Поиск: {(user.IsStarted ? "▶️ Поиск запущен!" : "⏹️ Остановлен")}
+                       """;
+        }
+
+        return (new ReplyKeyboardMarkup(buttons) { ResizeKeyboard = true, OneTimeKeyboard = false }, msgText);
     }
 
     private async Task AdminFindCommand(Message msg, string args, ApplicationDbContext dbContext,
@@ -213,52 +272,43 @@ public class TelegramBot : IDisposable
         switch (callbackQuery.Data)
         {
             case "renew_license":
-                await RenewLicenseCallbackQuery(callbackQuery, dbContext, user);
+                await RenewLicenseCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
-            case "filters":
-                await FiltersCallbackQuery(callbackQuery, dbContext, user);
+            case "filters_back":
+                await FiltersBackCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "price_range":
-                await PriceRangeCallbackQuery(callbackQuery, dbContext, user);
+                await PriceRangeCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "profit":
-                await ProfitCallbackQuery(callbackQuery, dbContext, user);
+                await ProfitCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "profit_set_10":
             case "profit_set_20":
             case "profit_set_30":
-                await ProfitSetCallbackQuery(callbackQuery, dbContext, user);
+                await ProfitSetCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "profit_set_custom":
-                await ProfitSetCustomCallbackQuery(callbackQuery, dbContext, user);
+                await ProfitSetCustomCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "criteria":
-                await CriteriaCallbackQuery(callbackQuery, dbContext, user);
+                await CriteriaCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "criteria_peak":
             case "criteria_percentile75":
             case "criteria_second_floor":
-                await CriteriaSetCallbackQuery(callbackQuery, dbContext, user);
-                break;
-            case "start_stop":
-                await StartStopCallbackQuery(callbackQuery, dbContext, user);
-                break;
-            case "start":
-                await StartCallbackQuery(callbackQuery, dbContext, user);
-                break;
-            case "stop":
-                await StopCallbackQuery(callbackQuery, dbContext, user);
+                await CriteriaSetCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "renew_license_1":
             case "renew_license_30":
-                await RenewLicenseDaysCallbackQuery(callbackQuery, dbContext, user);
+                await RenewLicenseDaysCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "renew_license_crystalpay_1":
             case "renew_license_crystalpay_30":
-                await RenewLicenseCrystalpayCallbackQuery(callbackQuery, dbContext, user);
+                await RenewLicenseCrystalpayCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case { } data when data.StartsWith("check_crystalpay_"):
-                await CheckCrystalpayCallbackQuery(callbackQuery, dbContext, user);
+                await CheckCrystalpayCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
         }
 
@@ -272,18 +322,39 @@ public class TelegramBot : IDisposable
         }
     }
 
-    private async Task RenewLicenseCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+    // private async Task MainMenuCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+    //     Data.Entities.User user)
+    // {
+    //     var (keyboard, msgText) = GetMainMenuMessage(user, false);
+    //     await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+    // }
+
+    private async Task SelectTariffTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        // 1, 30
         var keyboard = new InlineKeyboardMarkup([
             [
                 InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
                 InlineKeyboardButton.WithCallbackData("30 дней", "renew_license_30")
             ]
         ]);
-        await _botClient.SendMessage(callbackQuery.From.Id, "Выберите количество дней для продления лицензии:",
+        await _botClient.SendMessage(msg.From!.Id, "Выберите количество дней для продления лицензии:",
             replyMarkup: keyboard);
+    }
+
+    private async Task RenewLicenseCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var keyboard = new InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
+                InlineKeyboardButton.WithCallbackData("30 дней", "renew_license_30")
+            ]
+        ]);
+        // await _botClient.SendMessage(callbackQuery.From.Id,
+        //     "Выберите количество дней для продления лицензии:", replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            "Выберите количество дней для продления лицензии:", replyMarkup: keyboard);
     }
 
     private async Task RenewLicenseDaysCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -300,7 +371,9 @@ public class TelegramBot : IDisposable
                 InlineKeyboardButton.WithCallbackData("Crystalpay", $"renew_license_crystalpay_{days}")
             ]
         ]);
-        await _botClient.SendMessage(callbackQuery.From.Id,
+        // await _botClient.SendMessage(callbackQuery.From.Id,
+        //     $"Вы выбрали продление лицензии на {days} день(я). Выберите способ оплаты:", replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
             $"Вы выбрали продление лицензии на {days} день(я). Выберите способ оплаты:", replyMarkup: keyboard);
     }
 
@@ -350,9 +423,11 @@ public class TelegramBot : IDisposable
                 InlineKeyboardButton.WithCallbackData("Проверить оплату", $"check_crystalpay_{invoice.Id}")
             ]
         ]);
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Счет на оплату успешно создан. Сумма: {price} USDT.",
-            replyMarkup: keyboard);
+        // await _botClient.SendMessage(callbackQuery.From.Id,
+        //     $"Счет на оплату успешно создан. Сумма: {price} USDT.",
+        //     replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            $"Счет на оплату успешно создан. Сумма: {price} USDT.", replyMarkup: keyboard);
     }
 
     private async Task CheckCrystalpayCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -413,38 +488,63 @@ public class TelegramBot : IDisposable
     {
         if (user.License >= DateTimeOffset.UtcNow) return false;
         await _botClient.SendMessage(user.Id,
-            "У вас нет активной лицензии для использования фильтров.");
+            "У вас нет активной лицензии.");
         return true;
     }
 
-    private async Task FiltersCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+    private string CriteriaToString(Criteria criteria)
+    {
+        return criteria switch
+        {
+            Criteria.Peak => "Сравнение с максимальной ценой продажи или покупки  за последние  2 недели",
+            Criteria.Percentile75 => "Сравнение по 75 процентилю с ценами продажи или покупки  за последние  2 недели",
+            Criteria.SecondFloor => "Сравнение со вторым по дешевизне таким же подарком в продаже",
+            _ => string.Empty
+        };
+    }
+
+    private (InlineKeyboardMarkup keyboard, string msgText) GetFiltersMessage(Data.Entities.User user)
+    {
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData("💰 Диапазон цен", "price_range"),
+                InlineKeyboardButton.WithCallbackData("📈 Процент выгоды", "profit")
+            ],
+            [
+                InlineKeyboardButton.WithCallbackData("📊 Критерии оценки", "criteria")
+            ]
+        ]);
+        var msgText = $"""
+                       ⚙️ Текущие фильтры:
+
+                       💰 Диапазон цен: {user.PriceMin} - {user.PriceMax} TON
+                       📈 Минимальная выгода: {user.ProfitPercent}%
+                       📊 Критерии оценки: {CriteriaToString(user.Criteria)}
+
+                       Настройте фильтры под свои предпочтения:
+                       """;
+        return (new InlineKeyboardMarkup(buttons), msgText);
+    }
+
+    private async Task FiltersTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
         if (await CheckLicense(user))
             return;
+        var (keyboard, msgText) = GetFiltersMessage(user);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
+    }
 
-        var keyboard = new InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton.WithCallbackData("Диапазон цен", "price_range")
-            ],
-            [
-                InlineKeyboardButton.WithCallbackData("Выгода", "profit")
-            ],
-            [
-                InlineKeyboardButton.WithCallbackData("Критерии", "criteria")
-            ]
-        ]);
-        await _botClient.SendMessage(callbackQuery.From.Id, $"""
-                                                             Текущие фильтры:
-                                                             Диапазон цен: {user.PriceMin:0.00} - {user.PriceMax:0.00}
-                                                             Выгода: {user.ProfitPercent}%
-                                                             Критерии: {user.Criteria switch {
-                                                                 Criteria.Peak => "сравнение с самой высокой цене за 2 недели",
-                                                                 Criteria.Percentile75 => "75-й процентиль",
-                                                                 Criteria.SecondFloor => "Разница с 2ым флором",
-                                                                 _ => string.Empty }}
-                                                             Выберите действие:
-                                                             """, replyMarkup: keyboard);
+    private async Task FiltersBackCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        user.Status = Status.None;
+        await dbContext.SaveChangesAsync();
+        if (await CheckLicense(user))
+            return;
+        var (keyboard, msgText) = GetFiltersMessage(user);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
     }
 
     private async Task PriceRangeCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -454,45 +554,51 @@ public class TelegramBot : IDisposable
             return;
         user.Status = Status.WritingPriceRange;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            """
-            Введите диапазон цен в формате: <минимальная цена> <максимальная цена>.
-            Например: 5 15
-            Например: 5,50 15,11
-            Для отмены введите '/start'.
-            """);
+        var msgText = $"""
+                       💰 Настройка диапазона цен
+
+                       Текущий диапазон: {user.PriceMin} - {user.PriceMax} TON
+
+                       Введите новый диапазон в формате:
+                       минимальная_цена максимальная_цена
+                       Примеры:
+                       - 5 15
+                       - 0.5 100
+                       - 10 50.5
+                       """;
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
+            ]
+        ]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
     }
 
     private async Task PriceRangeSetValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
     {
         var parts = msg.Text?.Replace('.', ',').Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts is not { Length: 2 })
+        if (parts is not { Length: 2 } ||
+            !double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var min) ||
+            !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var max) || min < 0 ||
+            max < 0 || min >= max)
         {
-            await _botClient.SendMessage(msg.From!.Id,
-                "Неверный формат. Введите диапазон цен в формате: <минимальная цена> <максимальная цена>.");
+            await _botClient.SendMessage(msg.From!.Id, """
+                                                       ❌ Неверный формат
+
+                                                       Пожалуйста, введите цены в правильном формате:
+                                                       минимальная_цена максимальная_цена
+                                                       """);
             return;
         }
 
-        if (!double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var min) ||
-            !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var max))
-        {
-            await _botClient.SendMessage(msg.From!.Id,
-                "Неверный формат. Введите диапазон цен в формате: <минимальная цена> <максимальная цена>.");
-        }
-        else if (min < 0 || max < 0 || min >= max)
-        {
-            await _botClient.SendMessage(msg.From!.Id,
-                "Неверный диапазон цен. Минимальная цена должна быть меньше максимальной и больше или равна нулю.");
-        }
-        else
-        {
-            user.PriceMin = min;
-            user.PriceMax = max;
-            user.Status = Status.None;
-            await dbContext.SaveChangesAsync();
-            await _botClient.SendMessage(msg.From!.Id,
-                $"Диапазон цен успешно установлен: {min} - {max}.");
-        }
+        user.PriceMin = min;
+        user.PriceMax = max;
+        user.Status = Status.None;
+        await dbContext.SaveChangesAsync();
+        await FiltersTextCommand(msg, dbContext, user);
     }
 
     private async Task ProfitCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -508,12 +614,21 @@ public class TelegramBot : IDisposable
             ],
             [
                 InlineKeyboardButton.WithCallbackData("Ввести свой процент", "profit_set_custom")
+            ],
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
             ]
         ]);
-        await _botClient.SendMessage(callbackQuery.From.Id, $"""
-                                                             Текущий процент прибыли: {user.ProfitPercent}%
-                                                             Выберите действие:
-                                                             """, replyMarkup: keyboard);
+        var msgText = $"""
+                       📈 Настройка минимальной выгоды
+
+                       Текущий процент: {user.ProfitPercent}%
+
+                       Выберите минимальный процент выгоды для показа предложений:
+                       """;
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
     }
 
     private async Task ProfitSetCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -528,8 +643,7 @@ public class TelegramBot : IDisposable
         };
         user.ProfitPercent = percent;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Процент прибыли успешно установлен: {percent}%.");
+        await FiltersBackCallbackQuery(callbackQuery, dbContext, user);
     }
 
     private async Task ProfitSetCustomCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -537,12 +651,25 @@ public class TelegramBot : IDisposable
     {
         user.Status = Status.WritingProfitPercent;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            """
-            Введите процент прибыли в формате: <процент>.
-            Например: 10
-            Для отмены введите '/start'.
-            """);
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
+            ]
+        ]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        var msgText = $"""
+                       ⚡️Введите процент числом
+
+                       Текущий процент: {user.ProfitPercent}
+
+                       Введите новый процент в формате:
+                       процент
+                       Примеры:
+                       - 55
+                       """;
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
     }
 
     private async Task ProfitSetCustomValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
@@ -550,16 +677,19 @@ public class TelegramBot : IDisposable
         if (!int.TryParse(msg.Text, out var percent) || percent < 0)
         {
             await _botClient.SendMessage(msg.From!.Id,
-                "Неверный формат. Введите процент прибыли в формате: <процент>.");
+                """
+                ❌ Неверный формат
+
+                Пожалуйста, введите процент в правильном формате:
+                процент
+                """);
+            return;
         }
-        else
-        {
-            user.ProfitPercent = percent;
-            user.Status = Status.None;
-            await dbContext.SaveChangesAsync();
-            await _botClient.SendMessage(msg.From!.Id,
-                $"Процент прибыли успешно установлен: {percent}%.");
-        }
+
+        user.ProfitPercent = percent;
+        user.Status = Status.None;
+        await dbContext.SaveChangesAsync();
+        await FiltersTextCommand(msg, dbContext, user);
     }
 
     private async Task CriteriaCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -570,21 +700,31 @@ public class TelegramBot : IDisposable
 
         var keyboard = new InlineKeyboardMarkup([
             [
-                InlineKeyboardButton.WithCallbackData("Сравнение с самой высокой цене за 2 недели", "criteria_peak"),
-                InlineKeyboardButton.WithCallbackData("75-й процентиль", "criteria_percentile75")
+                InlineKeyboardButton.WithCallbackData("📈 Макс.", "criteria_peak"),
+                InlineKeyboardButton.WithCallbackData("📊 75%", "criteria_percentile75"),
+                InlineKeyboardButton.WithCallbackData("🔄 2 флор", "criteria_second_floor")
             ],
             [
-                InlineKeyboardButton.WithCallbackData("Разница с 2ым флором", "criteria_second_floor")
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
             ]
         ]);
-        await _botClient.SendMessage(callbackQuery.From.Id, $"""
-                                                             Текущие критерии: {user.Criteria switch {
-                                                                 Criteria.Peak => "сравнение с самой высокой цене за 2 недели",
-                                                                 Criteria.Percentile75 => "75-й процентиль",
-                                                                 Criteria.SecondFloor => "Разница с 2ым флором",
-                                                                 _ => string.Empty }}
-                                                             Выберите действие:
-                                                             """, replyMarkup: keyboard);
+        var msgText = $"""
+                       📊 Критерии оценки выгоды
+
+                       1 - Сравнение с максимальной ценой продажи или покупки  за последние  2 недели
+
+                       2 - Сравнение по 75 процентилю с ценами продажи или покупки  за последние  2 недели 
+
+                       3 - Сравнение со вторым по дешевизне таким же подарком в продаже
+
+
+                       Текущий критерий: {CriteriaToString(user.Criteria)}
+
+                       Выберите метод расчёта перспективности:
+                       """;
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
     }
 
     private async Task CriteriaSetCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -599,44 +739,91 @@ public class TelegramBot : IDisposable
         };
         user.Criteria = criteria;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Критерии успешно установлены: {criteria}.");
+        await FiltersBackCallbackQuery(callbackQuery, dbContext, user);
     }
 
-    private async Task StartStopCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
-        Data.Entities.User user)
-    {
-        if (await CheckLicense(user))
-            return;
-        var keyboard = new InlineKeyboardMarkup([
-            [
-                user.IsStarted
-                    ? InlineKeyboardButton.WithCallbackData("Остановить", "stop")
-                    : InlineKeyboardButton.WithCallbackData("Запустить", "start")
-            ]
-        ]);
-        await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Текущее состояние: {(user.IsStarted ? "Запущено" : "Остановлено")}", replyMarkup: keyboard);
-    }
-
-    private async Task StartCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+    private async Task StartTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
         if (await CheckLicense(user))
             return;
         user.IsStarted = true;
         await dbContext.SaveChangesAsync();
-        await StartStopCallbackQuery(callbackQuery, dbContext, user);
+        var msgText = $"""
+                       ▶️ Поиск запущен!
+
+                       Бот начал сканировать предложения по вашим фильтрам.
+                       Как только найдёт подходящие варианты - сразу пришлёт уведомление.
+
+                       Фильтры:
+                       💰 Цена: {user.PriceMin} - {user.PriceMax} TON
+                       📈 Выгода: от {user.ProfitPercent}%
+                       📊 Критерий: {CriteriaToString(user.Criteria)}
+                       """;
+        var (keyboard, _) = GetMainMenuMessage(user, false);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
-    private async Task StopCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+    private async Task StopTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
         if (await CheckLicense(user))
             return;
         user.IsStarted = false;
         await dbContext.SaveChangesAsync();
-        await StartStopCallbackQuery(callbackQuery, dbContext, user);
+        var msgText = """
+                      ⏹️ Поиск остановлен
+
+                      Бот прекратил сканирование предложений.
+                      Для возобновления нажмите "Запустить".
+                      """;
+        var (keyboard, _) = GetMainMenuMessage(user, false);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
+    }
+
+    private async Task FaqTextCommand(Message msg, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var msgText = """
+                      🔍 Как работает бот?
+                      Бот постоянно сканирует маркетплейсы Tonnel и Portals, анализирует цены, активность продаж, находит и помечает "грязные" подарки ( подарки с подписью)  и находит самые выгодные  подарки  согласно вашим фильтрам.
+
+                      📊 Что означают критерии оценки?
+                      - Сравнение с максимумом за 2 недели - сравнивает с самой высокой ценой за период
+                      - 75-й процентиль - статистический метод оценки
+                      - Разница со вторым по полу - сравнивает с похожими предложениями
+
+                      💰 Как рассчитывается выгода?
+                      -Перспектива показывает потенциальную выгоду для перепродажи подарка в процентах. Естественно это лишь приближенные данные - никаких гарантий бот дать не может.
+
+                      ⏰ Как часто приходят уведомления?
+                      Уведомления приходят сразу при обнаружении подходящего предложения. Частота зависит от ваших фильтров.
+
+                      🎁 Какие подарки ищет бот?
+                      Все виды Telegram подарков, доступных на маркетплейсах Tonnel и Portals. 
+
+
+                      Контакты для связи - https://t.me/retrowaiver
+                      """;
+        await _botClient.SendMessage(msg.From!.Id, msgText);
+    }
+
+    private async Task StatusTextCommand(Message msg, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var hoursDiff = (user.License - DateTimeOffset.UtcNow).TotalHours;
+        var msgText = $"""
+                       💎 Подписка: {(hoursDiff > 0 ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Неактивна")}
+                       🔍 Поиск: {(user.IsStarted ? "▶️ Запущен" : "⏹️ Остановлен")}
+                       {(hoursDiff <= 24 ? "⚠️ Подписка скоро истечёт! Продлите её, чтобы не пропустить выгодные предложения." : string.Empty)}
+                       """;
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData("💳 Продлить подписку", "renew_license")
+            ]
+        ]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
     public async Task SendSignal(string name, string model, double price, double percentDiff, bool isSold,
