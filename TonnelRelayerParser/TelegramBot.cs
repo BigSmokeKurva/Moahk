@@ -480,8 +480,9 @@ public class TelegramBot : IDisposable
             : user.License.AddDays(crystalpayInvoice.Days);
         crystalpayInvoice.IsPaid = true;
         await dbContext.SaveChangesAsync();
+        var (keyboard, _) = GetMainMenuMessage(user, false);
         await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Лицензия успешно продлена на {crystalpayInvoice.Days} день(я).");
+            $"Лицензия успешно продлена на {crystalpayInvoice.Days} день(я).", replyMarkup: keyboard);
     }
 
     private async Task<bool> CheckLicense(Data.Entities.User user)
@@ -845,7 +846,7 @@ public class TelegramBot : IDisposable
                    ━━━━━━━━━━━━━━━━━━━ 
                    💲 *Цена*: {price:F2} TON
                    💹 *Перспектива*: +{percentDiff:F2}%
-                   ✅ *Состояние*: {(isSold ? "Грязный" : "Чистый")}  
+                   {(isSold ? "❌ *Состояние*: Грязный" : "✅ *Состояние*: Чистый")}  
                    🔥 *Активность*: {activity switch
                    {
                        Activity.Low => "Низкая",
