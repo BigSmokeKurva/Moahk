@@ -1,21 +1,35 @@
 ﻿using System.Globalization;
+using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Moahk.Data;
+using Moahk.Data.Entities;
 using Moahk.Data.Enums;
 using Moahk.Parser;
+using Moahk.Parser.ResponseModels;
 using NLog;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using User = Telegram.Bot.Types.User;
 
 namespace Moahk;
 
-public class TelegramBot
+public class TelegramBot : IDisposable
 {
     private static readonly long[] Admins = ConfigurationManager.GetLongArray("Admins");
     private static readonly ILogger Logger = LogManager.GetCurrentClassLogger();
-    private readonly TelegramBotClient _botClient = new(ConfigurationManager.GetString("BotToken"));
+
+    private readonly TelegramBotClient _botClient =
+        new(ConfigurationManager.GetString("BotToken") ?? throw new InvalidOperationException());
+
+    private readonly string _crystalpayLogin =
+        ConfigurationManager.GetString("CrystalpayLogin") ?? throw new InvalidOperationException();
+
+    private readonly string _crystalpaySecret =
+        ConfigurationManager.GetString("CrystalpaySecret") ?? throw new InvalidOperationException();
+
+    private readonly HttpClient _httpClient = new();
     private readonly User _me;
 
     public TelegramBot()
@@ -28,6 +42,12 @@ public class TelegramBot
             Logger.Error(sender, "An error occurred in the Telegram bot.");
             return Task.CompletedTask;
         };
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        _botClient.Close();
     }
 
     private async Task OnMessage(Message msg, UpdateType type)
@@ -78,6 +98,12 @@ public class TelegramBot
             case "/start":
                 await StartCommand(msg, dbContext, user);
                 break;
+            case "/find" when Admins.Contains(msg.From!.Id):
+                await AdminFindCommand(msg, args, dbContext, user);
+                break;
+            case "/set_time" when Admins.Contains(msg.From!.Id):
+                await AdminSetTimeCommand(msg, args, dbContext, user);
+                break;
         }
     }
 
@@ -106,6 +132,67 @@ public class TelegramBot
                                                     Приветствие
                                                     {(licenseActive ? $"Лицензия: {user.License:yyyy-MM-dd HH:mm} UTC" : "Нет активной лицензии")}
                                                     """, replyMarkup: keyboard);
+    }
+
+    private async Task AdminFindCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (!long.TryParse(args, out var id))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                "Неверный формат. Используйте: /find <user_id>");
+            return;
+        }
+
+        var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == id);
+        if (foundUser is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
+            return;
+        }
+
+        await _botClient.SendMessage(msg.From!.Id, $"""
+                                                    Пользователь найден:
+                                                    ID: {foundUser.Id}
+                                                    Лицензия: {foundUser.License:yyyy-MM-dd HH:mm} UTC
+                                                    Диапазон цен: {foundUser.PriceMin:0.00} - {foundUser.PriceMax:0.00}
+                                                    Процент прибыли: {foundUser.ProfitPercent}%
+                                                    Критерии: {foundUser.Criteria switch {
+                                                        Criteria.Peak => "сравнение с самой высокой цене за 2 недели",
+                                                        Criteria.Percentile75 => "75-й процентиль",
+                                                        Criteria.SecondFloor => "Разница с 2ым флором",
+                                                        _ => string.Empty }}
+                                                    Статус: {foundUser.Status}
+                                                    Запущено: {foundUser.IsStarted}
+                                                    """);
+    }
+
+    private async Task AdminSetTimeCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        // Пример: /set_time 676456478 2023-10-01T12:00:00
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !long.TryParse(parts[0], out var userId) ||
+            !DateTimeOffset.TryParse(parts[1], null, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var newTime))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                "Неверный формат. Используйте: /set_time <user_id> <new_time>");
+            return;
+        }
+
+        var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (foundUser is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
+            return;
+        }
+
+        foundUser.License = newTime;
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(msg.From!.Id, $"""
+                                                    Лицензия пользователя {foundUser.Id} успешно изменена на {newTime:yyyy-MM-dd HH:mm} UTC.
+                                                    """);
     }
 
     private async Task OnUpdate(Update update)
@@ -162,17 +249,164 @@ public class TelegramBot
             case "stop":
                 await StopCallbackQuery(callbackQuery, dbContext, user);
                 break;
+            case "renew_license_1":
+            case "renew_license_30":
+                await RenewLicenseDaysCallbackQuery(callbackQuery, dbContext, user);
+                break;
+            case "renew_license_crystalpay_1":
+            case "renew_license_crystalpay_30":
+                await RenewLicenseCrystalpayCallbackQuery(callbackQuery, dbContext, user);
+                break;
+            case { } data when data.StartsWith("check_crystalpay_"):
+                await CheckCrystalpayCallbackQuery(callbackQuery, dbContext, user);
+                break;
         }
 
-        await _botClient.AnswerCallbackQuery(callbackQuery.Id);
+        try
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id);
+        }
+        catch
+        {
+            // ignored
+        }
     }
 
     private async Task RenewLicenseCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        user.License = DateTimeOffset.UtcNow.AddDays(30);
+        // 1, 30
+        var keyboard = new InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
+                InlineKeyboardButton.WithCallbackData("30 дней", "renew_license_30")
+            ]
+        ]);
+        await _botClient.SendMessage(callbackQuery.From.Id, "Выберите количество дней для продления лицензии:",
+            replyMarkup: keyboard);
+    }
+
+    private async Task RenewLicenseDaysCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var days = callbackQuery.Data switch
+        {
+            "renew_license_1" => 1,
+            "renew_license_30" => 30,
+            _ => throw new Exception("Неверное количество дней для продления лицензии.")
+        };
+        var keyboard = new InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton.WithCallbackData("Crystalpay", $"renew_license_crystalpay_{days}")
+            ]
+        ]);
+        await _botClient.SendMessage(callbackQuery.From.Id,
+            $"Вы выбрали продление лицензии на {days} день(я). Выберите способ оплаты:", replyMarkup: keyboard);
+    }
+
+    private async Task RenewLicenseCrystalpayCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var days = callbackQuery.Data switch
+        {
+            "renew_license_crystalpay_1" => 1,
+            "renew_license_crystalpay_30" => 30,
+            _ => throw new Exception("Неверное количество дней для продления лицензии.")
+        };
+        var price = days switch
+        {
+            1 => 2,
+            30 => 12,
+            _ => throw new Exception("Неверное количество дней для продления лицензии.")
+        };
+        using var r = await _httpClient.PostAsJsonAsync("https://api.crystalpay.io/v3/invoice/create/", new
+        {
+            auth_login = _crystalpayLogin,
+            auth_secret = _crystalpaySecret,
+            amount = price,
+            amount_currency = "USDT",
+            type = "purchase",
+            lifetime = 1000
+        });
+        var invoice = await r.Content.ReadFromJsonAsync<CrystalpayInvoiceCreateResponse>();
+        if (invoice is null || invoice.Error)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Ошибка при создании счета Crystalpay.");
+            Logger.Error("Ошибка при создании счета Crystalpay");
+            return;
+        }
+
+        dbContext.CrystalpayInvoices.Add(new CrystalpayInvoice
+        {
+            User = user,
+            Id = invoice.Id ?? throw new InvalidOperationException(),
+            Url = invoice.Url ?? throw new InvalidOperationException(),
+            Days = days
+        });
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(callbackQuery.From.Id, "Лицензия успешно продлена на 30 дней.");
+        var keyboard = new InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton.WithUrl("Оплатить", invoice.Url),
+                InlineKeyboardButton.WithCallbackData("Проверить оплату", $"check_crystalpay_{invoice.Id}")
+            ]
+        ]);
+        await _botClient.SendMessage(callbackQuery.From.Id,
+            $"Счет на оплату успешно создан. Сумма: {price} USDT.",
+            replyMarkup: keyboard);
+    }
+
+    private async Task CheckCrystalpayCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var invoiceId = callbackQuery.Data?.Replace("check_crystalpay_", string.Empty);
+        if (invoiceId is null)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Неверный идентификатор счета.");
+            return;
+        }
+
+        var crystalpayInvoice = await dbContext.CrystalpayInvoices
+            .FirstOrDefaultAsync(x => x.Id == invoiceId && x.User.Id == user.Id);
+        if (crystalpayInvoice is null)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не найден или не принадлежит вам.");
+            return;
+        }
+
+        if (crystalpayInvoice.IsPaid)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет уже оплачен.");
+            return;
+        }
+
+        using var r = await _httpClient.PostAsJsonAsync("https://api.crystalpay.io/v3/invoice/info/", new
+        {
+            auth_login = _crystalpayLogin,
+            auth_secret = _crystalpaySecret,
+            id = crystalpayInvoice.Id
+        });
+        var invoiceInfo = await r.Content.ReadFromJsonAsync<CrystalpayInvoiceInfoResponse>();
+        if (invoiceInfo is null || invoiceInfo.Error)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id,
+                "Ошибка при получении информации о счете Crystalpay.");
+            Logger.Error("Ошибка при получении информации о счете Crystalpay");
+            return;
+        }
+
+        if (invoiceInfo.State != "payed")
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не оплачен.");
+            return;
+        }
+
+        user.License = user.License < DateTimeOffset.Now
+            ? DateTimeOffset.UtcNow.AddDays(crystalpayInvoice.Days)
+            : user.License.AddDays(crystalpayInvoice.Days);
+        crystalpayInvoice.IsPaid = true;
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(callbackQuery.From.Id,
+            $"Лицензия успешно продлена на {crystalpayInvoice.Days} день(я).");
     }
 
     private async Task<bool> CheckLicense(Data.Entities.User user)

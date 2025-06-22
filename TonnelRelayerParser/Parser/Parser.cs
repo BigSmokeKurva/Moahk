@@ -55,6 +55,8 @@ public class Parser : IAsyncDisposable
         await _tonnelRelayerHttpClientPool.DisposeAsync();
         _portalsClient.Dispose();
         await _cancellationTokenSource.CancelAsync();
+        _cancellationTokenSource.Dispose();
+        _telegramBot.Dispose();
         GC.SuppressFinalize(this);
     }
 

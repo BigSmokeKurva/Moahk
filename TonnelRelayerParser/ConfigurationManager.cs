@@ -56,12 +56,9 @@ public static class ConfigurationManager
         return Configuration.GetConnectionString(name);
     }
 
-    public static long[] GetLongArray(string key, char separator = ',')
+    public static long[] GetLongArray(string key)
     {
-        var value = Configuration[key];
-        return string.IsNullOrWhiteSpace(value)
-            ? []
-            : value.Split(separator).Select(long.Parse).ToArray();
+        return Configuration.GetSection(key).Get<long[]>() ?? throw new InvalidOperationException();
     }
 
     public static T? GetSection<T>(string sectionName) where T : class, new()
