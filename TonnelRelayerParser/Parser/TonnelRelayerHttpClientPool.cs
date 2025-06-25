@@ -90,7 +90,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 "--disable-software-rasterizer",
                 "--ignore-certificate-errors",
                 "--ignore-ssl-errors",
-                "--disable-web-security",
+                // "--disable-web-security",
                 "--headless=new",
                 "--proxy-server=http://localhost:80"
             ]
@@ -164,20 +164,26 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 var json = JsonSerializer.Deserialize<Dictionary<string, string>>(txt)!;
                 try
                 {
+                    Logger.Info("Решение Turnstile");
                     var token = await SolveTurnstile(json);
                     await page.EvaluateAsync($"cfCallback('{token}')");
+                    Logger.Info($"Решение Turnstile для {browserContextItem.Id} успешно: {token}");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    Logger.Error($"Ошибка при решении Turnstile: {txt}");
+                    Logger.Error(ex, "Ошибка при решении Turnstile");
                 }
                 finally
                 {
                     browserContextItem.IsAvailable = true;
+                    lock (this)
+                    {
+                        _cache.Remove(browserContextItem.Id);
+                    }
                 }
             };
             await page.GotoAsync(
-                $"https://marketplace.tonnel.network/#tgWebAppData={TelegramRepository.TonnelRelayerTgWebAppData}");
+                "https://gifts3.tonnel.network/api/pageGifts");
             return browserContextItem;
         }));
         Size = proxies.Length;
@@ -265,7 +271,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 browserContextItem = _browserContexts!.FirstOrDefault(c => c.IsAvailable && !_cache.Contains(c.Id));
                 if (browserContextItem?.Context != null)
                 {
-                    _cache.Add(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddSeconds(1.5));
+                    _cache.Add(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddSeconds(2));
                     browserContextItem.IsAvailable = false;
                 }
             }
@@ -283,34 +289,34 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             var browserContextItem = await GetContext();
             try
             {
-                var script = """
-                             async ({url, jsonString}) => {
-                               var r = await fetch(url, {
-                                 "headers": {
-                                   "accept": "*/*",
-                                   "accept-language": "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7",
-                                   "content-type": "application/json",
-                                   "priority": "u=1, i",
-                                   "sec-ch-ua": "\"Microsoft Edge WebView2\";v=\"137\", \"Microsoft Edge\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Chromium\";v=\"137\"",
-                                   "sec-ch-ua-mobile": "?0",
-                                   "sec-ch-ua-platform": "\"Windows\"",
-                                   "sec-fetch-dest": "empty",
-                                   "sec-fetch-mode": "cors",
-                                   "sec-fetch-site": "same-site"
-                                 },
-                                 "referrer": "https://marketplace.tonnel.network/",
-                                 "referrerPolicy": "strict-origin-when-cross-origin",
-                                 "body": jsonString,
-                                 "method": "POST",
-                                 "mode": "cors",
-                                 "credentials": "omit"
-                               });
-                               return JSON.stringify({
-                                 status: r.status,
-                                 text: await r.text(),
-                               })
-                             }
-                             """;
+                const string script = """
+                                      async ({url, jsonString}) => {
+                                        var r = await fetch(url, {
+                                          "headers": {
+                                            "accept": "*/*",
+                                            "accept-language": "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7",
+                                            "content-type": "application/json",
+                                            "priority": "u=1, i",
+                                            "sec-ch-ua": "\"Microsoft Edge WebView2\";v=\"137\", \"Microsoft Edge\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Chromium\";v=\"137\"",
+                                            "sec-ch-ua-mobile": "?0",
+                                            "sec-ch-ua-platform": "\"Windows\"",
+                                            "sec-fetch-dest": "empty",
+                                            "sec-fetch-mode": "cors",
+                                            "sec-fetch-site": "same-site"
+                                          },
+                                          "referrer": "https://marketplace.tonnel.network/",
+                                          "referrerPolicy": "strict-origin-when-cross-origin",
+                                          "body": jsonString,
+                                          "method": "POST",
+                                          "mode": "cors",
+                                          "credentials": "include"
+                                        });
+                                        return JSON.stringify({
+                                          status: r.status,
+                                          text: await r.text(),
+                                        })
+                                      }
+                                      """;
 
                 var response = await browserContextItem.Page.EvaluateAsync<string>(script, new
                 {
@@ -321,8 +327,19 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 var status = ((JsonElement)result["status"]).GetInt32();
                 if (status == 403)
                 {
-                    await browserContextItem.Page.GotoAsync(
-                        $"https://marketplace.tonnel.network/#tgWebAppData={TelegramRepository.TonnelRelayerTgWebAppData}");
+                    try
+                    {
+                        await browserContextItem.Page.ReloadAsync();
+                        lock (this)
+                        {
+                            _cache.Set(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddMinutes(1.5));
+                        }
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
                     continue;
                 }
 

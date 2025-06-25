@@ -103,7 +103,6 @@ public class Parser : IAsyncDisposable
                 var historyData = await GetTonnelActivity(giftInfo);
                 if (historyData == null || historyData.Length == 0) continue;
                 var portalsGift = await PortalsCheckGift(giftInfo);
-                var tonnelSearchResults = await GetTonnelSearchResults(giftInfo);
                 _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
 
 
@@ -141,6 +140,27 @@ public class Parser : IAsyncDisposable
 
                 await MathPeak(gift, lastTwoWeeksItems);
                 await MathPercentile75(gift, lastTwoWeeksItems);
+                // backdrop false
+                portalsGift = await PortalsCheckGift(giftInfo, false);
+                portalsCurrentPrice = portalsGift?.Price != null
+                    ? double.Parse(portalsGift.Price.Replace('.', ','), NumberStyles.Any)
+                    : double.MaxValue;
+                gift =
+                    portalsCurrentPrice > tonnelCurrentPrice
+                        ? (giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            (double)tonnelCurrentPrice,
+                            giftInfo.Item2.GiftId,
+                            activity,
+                            $"https://t.me/nft/{giftInfo.Item1.Id}",
+                            $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
+                            $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
+                            giftInfo.Item1.IsSold)
+                        : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            portalsCurrentPrice, giftInfo.Item2.GiftId, activity,
+                            $"https://t.me/nft/{giftInfo.Item1.Id}",
+                            $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
+                            null, "portals", giftInfo.Item1.IsSold);
+                var tonnelSearchResults = await GetTonnelSearchResults(giftInfo, false);
                 if (tonnelSearchResults != null) await MathSecondFloor(gift, tonnelSearchResults);
             }
             catch (Exception ex)
@@ -172,7 +192,8 @@ public class Parser : IAsyncDisposable
         return response;
     }
 
-    private async Task<TonnelSearch[]?> GetTonnelSearchResults((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
+    private async Task<TonnelSearch[]?> GetTonnelSearchResults((GiftInfo, TonnelRelayerGiftInfo) giftInfo,
+        bool searchBackdrop = true)
     {
         var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelSearch[], object>(
             "https://gifts3.tonnel.network/api/pageGifts", new
@@ -182,8 +203,10 @@ public class Parser : IAsyncDisposable
                 sort = "{\"price\":1,\"gift_id\":-1}",
                 filter =
                     "{\"price\":{\"$exists\":true},\"buyer\":{\"$exists\":false},\"gift_name\":\"" +
-                    giftInfo.Item2.Name + "\",\"model\":\"" + giftInfo.Item2.Model + "\",\"backdrop\":{\"$in\":[\"" +
-                    giftInfo.Item2.Backdrop + "\"]},\"asset\":\"TON\"}",
+                    giftInfo.Item2.Name + "\",\"model\":\"" + giftInfo.Item2.Model + "\"," + (searchBackdrop
+                        ? "\"backdrop\":{\"$in\":[\"" +
+                          giftInfo.Item2.Backdrop + "\"]},"
+                        : string.Empty) + "\"asset\":\"TON\"}",
                 @ref = 0,
                 price_range = (object?)null,
                 user_auth =
@@ -347,7 +370,8 @@ public class Parser : IAsyncDisposable
 //         return false;
 //     }
 
-    private async Task<PortalsSearch.Result?> PortalsCheckGift((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
+    private async Task<PortalsSearch.Result?> PortalsCheckGift((GiftInfo, TonnelRelayerGiftInfo) giftInfo,
+        bool searchBackdrop = true)
     {
         try
         {
@@ -355,12 +379,12 @@ public class Parser : IAsyncDisposable
             var backdropTrimmed = backdrop[..backdrop.LastIndexOf(' ')];
             var model = giftInfo.Item2.Model!;
             var modelTrimmed = model[..model.LastIndexOf(' ')];
-            var url = $"https://portals-market.com/api/nfts/search?offset=0&limit=20" +
-                      $"&filter_by_backdrops={backdropTrimmed.Replace(' ', '+')}" +
+            var url = "https://portals-market.com/api/nfts/search?offset=0&limit=20" +
+                      (searchBackdrop ? $"&filter_by_backdrops={backdropTrimmed.Replace(' ', '+')}" : string.Empty) +
                       $"&filter_by_collections={giftInfo.Item2.Name?.Replace(' ', '+')}" +
                       $"&filter_by_models={modelTrimmed.Replace(' ', '+')}" +
-                      $"&sort_by=price+asc" +
-                      $"&status=listed";
+                      "&sort_by=price+asc" +
+                      "&status=listed";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization =
                 new AuthenticationHeaderValue("tma", TelegramRepository.PortalsDecodedTgWebAppData);
