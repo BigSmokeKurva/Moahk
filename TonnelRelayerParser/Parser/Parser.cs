@@ -1,5 +1,4 @@
 ﻿using System.Globalization;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.Caching;
 using System.Threading.Channels;
@@ -19,59 +18,27 @@ public class Parser : IAsyncDisposable
     private readonly Channel<(GiftInfo, TonnelRelayerGiftInfo)> _giftInfos =
         Channel.CreateBounded<(GiftInfo, TonnelRelayerGiftInfo)>(1000);
 
-    private readonly HttpClient _portalsClient;
+    private readonly PortalsHttpClientPool _portalsHttpClientPool = new();
+
 
     private readonly TelegramBot _telegramBot = new();
-    private readonly TonnelRelayerHttpClientPool _tonnelRelayerHttpClientPool = new();
-
-    public Parser()
-    {
-        string[][] portalsHeaders =
-        [
-            ["accept", "application/json, text/plain, */*"],
-            ["accept-language", "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7"],
-            ["priority", "u=1, i"],
-            ["referer", "https://portals-market.com/"],
-            [
-                "sec-ch-ua",
-                "\"Microsoft Edge\";v=\"136\", \"Microsoft Edge WebView2\";v=\"136\", \"Not.A/Brand\";v=\"99\", \"Chromium\";v=\"136\""
-            ],
-            ["sec-ch-ua-mobile", "?0"],
-            ["sec-ch-ua-platform", "\"Windows\""],
-            ["sec-fetch-dest", "empty"],
-            ["sec-fetch-mode", "cors"],
-            ["sec-fetch-site", "same-origin"],
-            [
-                "user-agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
-            ]
-        ];
-        _portalsClient = new HttpClient();
-        AddHeaders(_portalsClient, portalsHeaders);
-    }
+    private readonly TonnelRelayerBrowserContextPool _tonnelRelayerBrowserContextPool = new();
 
     public async ValueTask DisposeAsync()
     {
-        await _tonnelRelayerHttpClientPool.DisposeAsync();
-        _portalsClient.Dispose();
+        await _tonnelRelayerBrowserContextPool.DisposeAsync();
         await _cancellationTokenSource.CancelAsync();
         _cancellationTokenSource.Dispose();
         _telegramBot.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    private static void AddHeaders(HttpClient client, string[][] headers)
-    {
-        foreach (var h in headers)
-            client.DefaultRequestHeaders.Add(h[0], h[1]);
-    }
-
     public async Task Start()
     {
-        await _tonnelRelayerHttpClientPool.Start();
+        await _tonnelRelayerBrowserContextPool.Start();
         _ = RunTonnelGetMarketGiftsLoop();
         var activityThreads = new List<Task>();
-        for (var i = 0; i < _tonnelRelayerHttpClientPool.Size - 1; i++)
+        for (var i = 0; i < _tonnelRelayerBrowserContextPool.Size - 1; i++)
         {
             var activityThread = TonnelActivityThread();
             activityThreads.Add(activityThread);
@@ -180,7 +147,7 @@ public class Parser : IAsyncDisposable
 
     private async Task<TonnelRelayerHistoryGiftInfo[]?> GetTonnelActivity((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
     {
-        var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelRelayerHistoryGiftInfo[], object>(
+        var response = await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelRelayerHistoryGiftInfo[], object>(
             "https://gifts3.tonnel.network/api/saleHistory",
             new
             {
@@ -203,7 +170,7 @@ public class Parser : IAsyncDisposable
     private async Task<TonnelSearch[]?> GetTonnelSearchResults((GiftInfo, TonnelRelayerGiftInfo) giftInfo,
         bool searchBackdrop = true)
     {
-        var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelSearch[], object>(
+        var response = await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelSearch[], object>(
             "https://gifts3.tonnel.network/api/pageGifts", new
             {
                 page = 1,
@@ -396,10 +363,7 @@ public class Parser : IAsyncDisposable
                       $"&filter_by_models={modelTrimmed.Replace(' ', '+')}" +
                       "&sort_by=price+asc" +
                       "&status=listed";
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization =
-                new AuthenticationHeaderValue("tma", TelegramRepository.PortalsDecodedTgWebAppData);
-            using var response = await _portalsClient.SendAsync(request);
+            using var response = await _portalsHttpClientPool.SendAsync(url, HttpMethod.Get);
             if (!response.IsSuccessStatusCode)
             {
                 Logger.Warn($"Ошибка при получении подарка {giftInfo.Item2.GiftId} на порталах: {response.StatusCode}");
@@ -447,7 +411,7 @@ public class Parser : IAsyncDisposable
     {
         try
         {
-            var response = await _tonnelRelayerHttpClientPool.PostAsJsonAsync<TonnelRelayerGiftInfo[], object>(
+            var response = await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelRelayerGiftInfo[], object>(
                 "https://gifts3.tonnel.network/api/pageGifts", new
                 {
                     page,

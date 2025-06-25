@@ -1,30 +1,25 @@
-﻿using System.Net;
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Runtime.Caching;
 using System.Text.Json;
 using Microsoft.Playwright;
 using Moahk.Parser.ResponseModels;
 using NLog;
-using Titanium.Web.Proxy;
-using Titanium.Web.Proxy.Models;
 
 namespace Moahk.Parser;
 
 public class BrowserContextItem(
     IBrowserContext context,
     IPage page,
-    ProxyServer proxyServer,
     string id,
     bool isAvailable = true)
 {
     public IBrowserContext Context { get; } = context;
     public IPage Page { get; } = page;
-    public ProxyServer ProxyServer { get; } = proxyServer;
     public string Id { get; } = id;
     public bool IsAvailable { get; set; } = isAvailable;
 }
 
-public class TonnelRelayerHttpClientPool : IAsyncDisposable
+public class TonnelRelayerBrowserContextPool : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -50,7 +45,6 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             {
                 await browserContext.Page.CloseAsync();
                 await browserContext.Context.CloseAsync();
-                browserContext.ProxyServer.Stop();
             }
 
         if (_browser is not null)
@@ -100,31 +94,55 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
             await Task.Delay(200, StoppingToken);
         _browserContexts = await Task.WhenAll(proxies.Select(async (proxy, index) =>
         {
-            ProxyServer proxyServer = new();
-            var explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Parse("127.0.0.1"), 45000 + index, false);
-            proxyServer.CertificateManager.CertificateValidDays = 365;
-            if (proxyServer.CertificateManager.RootCertificate == null)
-                await proxyServer.CertificateManager.LoadOrCreateRootCertificateAsync(cancellationToken: StoppingToken);
-            proxyServer.CertificateManager.TrustRootCertificate(true);
-            proxyServer.AddEndPoint(explicitEndPoint);
-            var proxUri = new Uri(proxy.Url);
-            var externalProxy = new ExternalProxy
-            {
-                HostName = proxUri.Host,
-                Port = proxUri.Port,
-                UserName = proxy.Username,
-                Password = proxy.Password,
-                ProxyType = proxUri.Scheme == "http" ? ExternalProxyType.Http : ExternalProxyType.Socks5
-            };
-            proxyServer.UpStreamHttpProxy = externalProxy;
-            proxyServer.UpStreamHttpsProxy = externalProxy;
-            await proxyServer.StartAsync(cancellationToken: StoppingToken);
-            var proxyServerUrl = $"http://{explicitEndPoint.IpAddress}:{explicitEndPoint.Port}";
+            // ProxyServer proxyServer = new();
+            // var explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Parse("127.0.0.1"), 45000 + index, false);
+            // proxyServer.CertificateManager.CertificateValidDays = 365;
+            // if (proxyServer.CertificateManager.RootCertificate == null)
+            //     await proxyServer.CertificateManager.LoadOrCreateRootCertificateAsync(cancellationToken: StoppingToken);
+            // proxyServer.CertificateManager.TrustRootCertificate(true);
+            // // linux trust root certificate
+            // if (OperatingSystem.IsLinux())
+            // {
+            //     var rootCert = proxyServer.CertificateManager.RootCertificate;
+            //     var certPath = "/usr/local/share/ca-certificates/titaniumproxy.crt";
+            //     await File.WriteAllBytesAsync(certPath, rootCert.Export(X509ContentType.Cert), StoppingToken);
+            //     // sudo update-ca-certificates
+            //     var process = new Process
+            //     {
+            //         StartInfo = new ProcessStartInfo
+            //         {
+            //             FileName = "bash",
+            //             Arguments = $"-c \"sudo update-ca-certificates\"",
+            //             RedirectStandardOutput = true,
+            //             RedirectStandardError = true,
+            //             UseShellExecute = false,
+            //             CreateNoWindow = true
+            //         }
+            //     };
+            //     process.Start();
+            // }
+            // proxyServer.AddEndPoint(explicitEndPoint);
+            var proxyUri = new Uri(proxy.Url);
+            // var externalProxy = new ExternalProxy
+            // {
+            //     HostName = proxUri.Host,
+            //     Port = proxUri.Port,
+            //     UserName = proxy.Username,
+            //     Password = proxy.Password,
+            //     ProxyType = proxUri.Scheme == "http" ? ExternalProxyType.Http : ExternalProxyType.Socks5
+            // };
+            // proxyServer.UpStreamHttpProxy = externalProxy;
+            // proxyServer.UpStreamHttpsProxy = externalProxy;
+            // await proxyServer.StartAsync(cancellationToken: StoppingToken);
+            // var proxyServerUrl = $"http://{explicitEndPoint.IpAddress}:{explicitEndPoint.Port}";
+            var proxyServerUrl = $"{proxyUri.Scheme}://{proxyUri.Host}:{proxyUri.Port}";
             var contextOptions = new BrowserNewContextOptions
             {
                 Proxy = new Proxy
                 {
-                    Server = proxyServerUrl
+                    Server = proxyServerUrl,
+                    Username = proxy.Username,
+                    Password = proxy.Password
                 },
                 IgnoreHTTPSErrors = true,
                 UserAgent = userAgent
@@ -153,7 +171,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                     }
                 }, 50)
                 """);
-            var browserContextItem = new BrowserContextItem(context, page, proxyServer, index.ToString());
+            var browserContextItem = new BrowserContextItem(context, page, index.ToString());
             page.Console += async (_, msg) =>
             {
                 var txt = msg.Text;
@@ -271,7 +289,7 @@ public class TonnelRelayerHttpClientPool : IAsyncDisposable
                 browserContextItem = _browserContexts!.FirstOrDefault(c => c.IsAvailable && !_cache.Contains(c.Id));
                 if (browserContextItem?.Context != null)
                 {
-                    _cache.Add(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddSeconds(2));
+                    _cache.Add(browserContextItem.Id, 0, DateTimeOffset.UtcNow.AddSeconds(3));
                     browserContextItem.IsAvailable = false;
                 }
             }
