@@ -117,25 +117,32 @@ public class Parser : IAsyncDisposable
                     _ => Activity.High
                 };
                 var tonnelCurrentPrice = giftInfo.Item2.Price + giftInfo.Item2.Price * 0.1;
-                var portalsCurrentPrice = portalsGift?.Price != null
+                double? portalsCurrentPrice = portalsGift?.Price != null
                     ? double.Parse(portalsGift.Price.Replace('.', ','), NumberStyles.Any)
-                    : double.MaxValue;
+                    : null;
+                if (tonnelCurrentPrice is null && portalsCurrentPrice is null)
+                {
+                    Logger.Warn($"Подарок {giftInfo.Item1.Id} не имеет цены на порталах и тоннеле.");
+                    continue;
+                }
+
                 (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string
-                    TgUrl, string BotUrl, string? SiteUrl, string botName, bool isSold) gift =
-                        portalsCurrentPrice > tonnelCurrentPrice
+                    TgUrl, string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice) gift =
+                        portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
                             ? (giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                                (double)tonnelCurrentPrice,
+                                tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
                                 giftInfo.Item2.GiftId,
                                 activity,
                                 $"https://t.me/nft/{giftInfo.Item1.Id}",
                                 $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
                                 $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
-                                giftInfo.Item1.IsSold)
+                                giftInfo.Item1.IsSold, portalsCurrentPrice)
                             : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                                portalsCurrentPrice, giftInfo.Item2.GiftId, activity,
+                                portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                                giftInfo.Item2.GiftId, activity,
                                 $"https://t.me/nft/{giftInfo.Item1.Id}",
                                 $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                                null, "portals", giftInfo.Item1.IsSold);
+                                null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice);
 
 
                 await MathPeak(gift, lastTwoWeeksItems);
@@ -146,20 +153,21 @@ public class Parser : IAsyncDisposable
                     ? double.Parse(portalsGift.Price.Replace('.', ','), NumberStyles.Any)
                     : double.MaxValue;
                 gift =
-                    portalsCurrentPrice > tonnelCurrentPrice
+                    portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
                         ? (giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                            (double)tonnelCurrentPrice,
+                            tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
                             giftInfo.Item2.GiftId,
                             activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
                             $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold)
+                            giftInfo.Item1.IsSold, portalsCurrentPrice)
                         : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                            portalsCurrentPrice, giftInfo.Item2.GiftId, activity,
+                            portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                            giftInfo.Item2.GiftId, activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold);
+                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice);
                 var tonnelSearchResults = await GetTonnelSearchResults(giftInfo, false);
                 if (tonnelSearchResults != null) await MathSecondFloor(gift, tonnelSearchResults);
             }
@@ -217,7 +225,7 @@ public class Parser : IAsyncDisposable
 
     private async Task MathPeak(
         (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold) gift,
+            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice) gift,
         TonnelRelayerHistoryGiftInfo[] lastTwoWeeksItems)
     {
         if (lastTwoWeeksItems.Length == 0) return;
@@ -225,24 +233,26 @@ public class Parser : IAsyncDisposable
         var percentDiff = (maxPrice - gift.Price) / maxPrice * 100.0;
         if (percentDiff > 0)
             await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.isSold,
-                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Peak);
+                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Peak,
+                gift.alternativePrice);
     }
 
     private async Task MathPercentile75(
         (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold) gift,
+            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice) gift,
         TonnelRelayerHistoryGiftInfo[] lastTwoWeeksItems)
     {
         var percentile = lastTwoWeeksItems.Select(x => (double)x.Price!).Percentile(75);
         var percentDiff = (percentile - gift.Price) / percentile * 100.0;
         if (percentDiff > 0)
             await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, percentDiff, gift.isSold, gift.Activity,
-                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Percentile75);
+                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Percentile75, gift.alternativePrice);
     }
 
     private async Task MathSecondFloor(
         (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold) gift, TonnelSearch[] tonnelSearchResults)
+            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice) gift,
+        TonnelSearch[] tonnelSearchResults)
     {
         if (tonnelSearchResults.Length < 2)
         {
@@ -256,7 +266,8 @@ public class Parser : IAsyncDisposable
         var percentDiff = (secondFloor.Price - gift.Price) / secondFloor.Price * 100.0;
         if (percentDiff > 0)
             await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.isSold,
-                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.SecondFloor);
+                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.SecondFloor,
+                gift.alternativePrice);
     }
 
 //     private async Task<bool> ProcessGift(TonnelRelayerHistoryGiftInfo[] historyData, string cacheKey,

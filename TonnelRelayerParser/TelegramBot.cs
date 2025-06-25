@@ -830,7 +830,8 @@ public class TelegramBot : IDisposable
     public async Task SendSignal(string name, string model, double price, double percentDiff, bool isSold,
         Activity activity,
         string tgUrl, string botUrl,
-        string? siteUrl, string botName, Criteria criteria)
+        string? siteUrl, string botName, Criteria criteria, double? alternativePrice)
+
     {
         await using var dbContext = new ApplicationDbContext();
         var users = await dbContext.Users
@@ -854,6 +855,16 @@ public class TelegramBot : IDisposable
                        _ => "Высокая"
                    }}  
                    ━━━━━━━━━━━━━━━━━━━ 
+                   {(alternativePrice is not null ? $"""
+                                                     🔀{(botName switch {
+                                                         "portals" => "tonnel",
+                                                         "tonnel" => "portals",
+                                                         _ => throw new ArgumentOutOfRangeException(nameof(botName), botName, null) }).ToUpper()}
+
+                                                     ━━━━━━━━━━━━━━━━━━━ 
+                                                     💲 *Цена*: {alternativePrice:F2} TON
+                                                     ━━━━━━━━━━━━━━━━━━━ 
+                                                     """ : string.Empty)}
                    """;
         var buttons = new List<List<InlineKeyboardButton>>([
             [
