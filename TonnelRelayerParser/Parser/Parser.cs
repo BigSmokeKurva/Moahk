@@ -9,6 +9,22 @@ using NLog;
 
 namespace Moahk.Parser;
 
+public record Gift(
+    string Name,
+    string Model,
+    string Backdrop,
+    double Price,
+    double GiftId,
+    Activity Activity,
+    string TgUrl,
+    string BotUrl,
+    string? SiteUrl,
+    string BotName,
+    bool IsSold,
+    double? AlternativePrice,
+    DateTimeOffset LastActivity,
+    double LastActivityPrice);
+
 public class Parser : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -93,23 +109,24 @@ public class Parser : IAsyncDisposable
                     continue;
                 }
 
-                (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string
-                    TgUrl, string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice, DateTimeOffset lastActivity, double lastActivityPrice) gift =
-                        portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                            ? (giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                                tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
-                                giftInfo.Item2.GiftId,
-                                activity,
-                                $"https://t.me/nft/{giftInfo.Item1.Id}",
-                                $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
-                                $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
-                                giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value)
-                            : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                                portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                                giftInfo.Item2.GiftId, activity,
-                                $"https://t.me/nft/{portalsGift.TgId}",
-                                $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                                null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value);
+                var gift =
+                    portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
+                        ? new Gift(giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
+                            giftInfo.Item2.GiftId,
+                            activity,
+                            $"https://t.me/nft/{giftInfo.Item1.Id}",
+                            $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
+                            $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
+                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value)
+                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                            giftInfo.Item2.GiftId, activity,
+                            $"https://t.me/nft/{portalsGift.TgId}",
+                            $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
+                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value);
 
 
                 await MathPeak(gift, lastTwoWeeksItems);
@@ -121,20 +138,22 @@ public class Parser : IAsyncDisposable
                 tonnelCurrentPrice = tonnelGiftFirst?.Price + tonnelGiftFirst?.Price * 0.04;
                 gift =
                     portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                        ? (giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
+                        ? new Gift(giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
                             tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
                             (double)tonnelGiftFirst.GiftId!,
                             activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
                             $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value)
-                        : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value)
+                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
                             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
                             giftInfo.Item2.GiftId, activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value);
+                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value);
                 await MathSecondFloor(gift, tonnelSearchResults!, Criteria.SecondFloorWithBackdrop);
                 // backdrop false
                 portalsGift = await PortalsCheckGift(giftInfo, false);
@@ -148,20 +167,22 @@ public class Parser : IAsyncDisposable
                 tonnelCurrentPrice = tonnelGiftFirst?.Price + tonnelGiftFirst?.Price * 0.04;
                 gift =
                     portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                        ? (giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
+                        ? new Gift(giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
                             tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
                             (double)tonnelGiftFirst.GiftId!,
                             activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
                             $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value)
-                        : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value)
+                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
                             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
                             giftInfo.Item2.GiftId, activity,
                             $"https://t.me/nft/{giftInfo.Item1.Id}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value, historyData[0].Price!.Value);
+                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                            historyData[0].Price!.Value);
                 await MathSecondFloor(gift, tonnelSearchResults!, Criteria.SecondFloor);
             }
             catch (Exception ex)
@@ -217,34 +238,32 @@ public class Parser : IAsyncDisposable
     }
 
     private async Task MathPeak(
-        (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice, DateTimeOffset lastActivity, double lastActivityPrice) gift,
+        Gift gift,
         TonnelRelayerHistoryGiftInfo[] lastTwoWeeksItems)
     {
         if (lastTwoWeeksItems.Length == 0) return;
         var maxPrice = lastTwoWeeksItems.OrderByDescending(x => x.Price).First().Price;
         var percentDiff = (maxPrice - gift.Price) / maxPrice * 100.0;
         if (percentDiff > 0)
-            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.isSold,
-                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Peak,
-                gift.alternativePrice, gift.lastActivity, gift.lastActivityPrice, gift.Backdrop);
+            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.IsSold,
+                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.BotName, Criteria.Peak,
+                gift.AlternativePrice, gift.LastActivity, gift.LastActivityPrice, gift.Backdrop);
     }
 
     private async Task MathPercentile75(
-        (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice, DateTimeOffset lastActivity, double lastActivityPrice) gift,
+        Gift gift,
         TonnelRelayerHistoryGiftInfo[] lastTwoWeeksItems)
     {
         var percentile = lastTwoWeeksItems.Select(x => (double)x.Price!).Percentile(75);
         var percentDiff = (percentile - gift.Price) / percentile * 100.0;
         if (percentDiff > 0)
-            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, percentDiff, gift.isSold, gift.Activity,
-                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, Criteria.Percentile75, gift.alternativePrice, gift.lastActivity, gift.lastActivityPrice, gift.Backdrop);
+            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, percentDiff, gift.IsSold, gift.Activity,
+                gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.BotName, Criteria.Percentile75, gift.AlternativePrice,
+                gift.LastActivity, gift.LastActivityPrice, gift.Backdrop);
     }
 
     private async Task MathSecondFloor(
-        (string Name, string Model, string Backdrop, double Price, double GiftId, Activity Activity, string TgUrl,
-            string BotUrl, string? SiteUrl, string botName, bool isSold, double? alternativePrice, DateTimeOffset lastActivity, double lastActivityPrice) gift,
+        Gift gift,
         TonnelSearch[] tonnelSearchResults, Criteria criteria)
     {
         if (tonnelSearchResults.Length < 2)
@@ -258,9 +277,9 @@ public class Parser : IAsyncDisposable
             return;
         var percentDiff = (secondFloor.Price - gift.Price) / secondFloor.Price * 100.0;
         if (percentDiff > 0)
-            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.isSold,
-                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.botName, criteria,
-                gift.alternativePrice, gift.lastActivity, gift.lastActivityPrice, gift.Backdrop);
+            await _telegramBot.SendSignal(gift.Name, gift.Model, gift.Price, (double)percentDiff, gift.IsSold,
+                gift.Activity, gift.TgUrl, gift.BotUrl, gift.SiteUrl, gift.BotName, criteria,
+                gift.AlternativePrice, gift.LastActivity, gift.LastActivityPrice, gift.Backdrop);
     }
 
 //     private async Task<bool> ProcessGift(TonnelRelayerHistoryGiftInfo[] historyData, string cacheKey,

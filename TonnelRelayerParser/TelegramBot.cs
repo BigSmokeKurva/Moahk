@@ -304,7 +304,7 @@ public class TelegramBot : IDisposable
             case "renew_license_30":
                 await RenewLicenseDaysCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
-            case "renew_license_crystalpay_1":
+            // case "renew_license_crystalpay_1":
             case "renew_license_crystalpay_30":
                 await RenewLicenseCrystalpayCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
@@ -335,7 +335,7 @@ public class TelegramBot : IDisposable
     {
         var keyboard = new InlineKeyboardMarkup([
             [
-                InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
+                // InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
                 InlineKeyboardButton.WithCallbackData("30 дней", "renew_license_30")
             ]
         ]);
@@ -348,7 +348,7 @@ public class TelegramBot : IDisposable
     {
         var keyboard = new InlineKeyboardMarkup([
             [
-                InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
+                // InlineKeyboardButton.WithCallbackData("1 день", "renew_license_1"),
                 InlineKeyboardButton.WithCallbackData("30 дней", "renew_license_30")
             ]
         ]);
@@ -363,7 +363,7 @@ public class TelegramBot : IDisposable
     {
         var days = callbackQuery.Data switch
         {
-            "renew_license_1" => 1,
+            // "renew_license_1" => 1,
             "renew_license_30" => 30,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
@@ -383,14 +383,14 @@ public class TelegramBot : IDisposable
     {
         var days = callbackQuery.Data switch
         {
-            "renew_license_crystalpay_1" => 1,
+            // "renew_license_crystalpay_1" => 1,
             "renew_license_crystalpay_30" => 30,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
         var price = days switch
         {
-            1 => 2,
-            30 => 12,
+            // 1 => 2,
+            30 => 35,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
         using var r = await _httpClient.PostAsJsonAsync("https://api.crystalpay.io/v3/invoice/create/", new
@@ -844,7 +844,8 @@ public class TelegramBot : IDisposable
     public async Task SendSignal(string name, string model, double price, double percentDiff, bool isSold,
         Activity activity,
         string tgUrl, string botUrl,
-        string? siteUrl, string botName, Criteria criteria, double? alternativePrice, DateTimeOffset lastActivity, double lastActivityPrice, string backdrop)
+        string? siteUrl, string botName, Criteria criteria, double? alternativePrice, DateTimeOffset lastActivity,
+        double lastActivityPrice, string backdrop)
 
     {
         await using var dbContext = new ApplicationDbContext();
