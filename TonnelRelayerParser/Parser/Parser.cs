@@ -31,8 +31,8 @@ public class Parser : IAsyncDisposable
     private readonly MemoryCache _cache = new("TonnelRelayerParserCache");
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
-    private readonly Channel<(GiftInfo, TonnelRelayerGiftInfo)> _giftInfos =
-        Channel.CreateBounded<(GiftInfo, TonnelRelayerGiftInfo)>(1000);
+    private readonly Channel<TonnelRelayerGiftInfo> _giftInfos =
+        Channel.CreateBounded<TonnelRelayerGiftInfo>(1000);
 
     private readonly PortalsHttpClientPool _portalsHttpClientPool = new();
 
@@ -68,24 +68,27 @@ public class Parser : IAsyncDisposable
         while (!_cancellationTokenSource.IsCancellationRequested)
         {
             var giftInfo = await _giftInfos.Reader.ReadAsync();
-            var cacheKey = giftInfo.Item1.Id + giftInfo.Item2.Price;
+            var telegramGiftId = string.Concat(giftInfo.Name?.Where(char.IsLetter) ?? string.Empty)
+                                 + '-' + giftInfo.GiftNum;
             try
             {
-                if (giftInfo.Item2.GiftId < 0)
+                var tgGiftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
+                var cacheKey = tgGiftInfo.Id + giftInfo.Price;
+                if (giftInfo.GiftId < 0)
                 {
-                    Logger.Warn($"Подарок {giftInfo.Item1.Id} имеет id < 0, пропускаем.");
+                    Logger.Warn($"Подарок {tgGiftInfo.Id} имеет id < 0, пропускаем.");
                     continue;
                 }
 
                 if (_cache.Contains(cacheKey))
                 {
-                    Logger.Info($"Подарок {giftInfo.Item1.Id} недавно был обработан, пропускаем.");
+                    Logger.Info($"Подарок {tgGiftInfo.Id} недавно был обработан, пропускаем.");
                     continue;
                 }
 
                 var historyData = await GetTonnelActivity(giftInfo);
                 if (historyData == null || historyData.Length == 0) continue;
-                var portalsGift = await PortalsCheckGift(giftInfo);
+                var portalsGift = await PortalsCheckGift(telegramGiftId, giftInfo);
                 _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
 
 
@@ -99,34 +102,44 @@ public class Parser : IAsyncDisposable
                     < 10 => Activity.Medium,
                     _ => Activity.High
                 };
-                var tonnelCurrentPrice = giftInfo.Item2.Price + giftInfo.Item2.Price * 0.04;
+                var tonnelCurrentPrice = giftInfo.Price + giftInfo.Price * 0.04;
                 double? portalsCurrentPrice = portalsGift?.Price != null
                     ? double.Parse(portalsGift.Price, CultureInfo.InvariantCulture)
                     : null;
                 if (tonnelCurrentPrice is null && portalsCurrentPrice is null)
                 {
-                    Logger.Warn($"Подарок {giftInfo.Item1.Id} не имеет цены на порталах и тоннеле.");
+                    Logger.Warn($"Подарок {tgGiftInfo.Id} не имеет цены на порталах и тоннеле.");
                     continue;
                 }
 
-                var gift =
-                    portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                        ? new Gift(giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-                            tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
-                            giftInfo.Item2.GiftId,
-                            activity,
-                            $"https://t.me/nft/{giftInfo.Item1.Id}",
-                            $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
-                            $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
-                            portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            long.Parse(portalsGift.TgId!), activity,
-                            $"https://t.me/nft/{portalsGift.TgId}",
-                            $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value);
+                Gift gift;
+                if (portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice)
+                {
+                    gift = new Gift(giftInfo.Name!, giftInfo.Model!, giftInfo.Backdrop!,
+                        tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
+                        giftInfo.GiftId,
+                        activity,
+                        $"https://t.me/nft/{telegramGiftId}",
+                        $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.GiftId}",
+                        $"https://market.tonnel.network/?giftDrawerId={giftInfo.GiftId}", "tonnel",
+                        tgGiftInfo.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                        historyData[0].Price!.Value);
+                }
+                else
+                {
+                    telegramGiftId = string.Concat(portalsGift?.Name?.Where(char.IsLetter) ?? string.Empty)
+                                     + '-' + portalsGift!.ExternalCollectionNumber;
+                    tgGiftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
+                    gift = new Gift(portalsGift.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!,
+                        portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
+                        portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                        portalsGift.ExternalCollectionNumber ?? throw new Exception("ExternalCollectionNumber is null"),
+                        activity,
+                        $"https://t.me/nft/{telegramGiftId}",
+                        $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
+                        null, "portals", tgGiftInfo.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                        historyData[0].Price!.Value);
+                }
 
 
                 await MathPeak(gift, lastTwoWeeksItems);
@@ -135,28 +148,36 @@ public class Parser : IAsyncDisposable
                 var tonnelGiftFirst = tonnelSearchResults?.MinBy(x => x.Price);
                 if (tonnelGiftFirst == null) continue;
 
-                tonnelCurrentPrice = tonnelGiftFirst?.Price + tonnelGiftFirst?.Price * 0.04;
-                gift =
-                    portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                        ? new Gift(giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
-                            tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
-                            (double)tonnelGiftFirst.GiftId!,
-                            activity,
-                            $"https://t.me/nft/{giftInfo.Item1.Id}",
-                            $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
-                            $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
-                            portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            long.Parse(portalsGift.TgId!), activity,
-                            $"https://t.me/nft/{portalsGift.TgId}",
-                            $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value);
+                tonnelCurrentPrice = tonnelGiftFirst.Price + tonnelGiftFirst.Price * 0.04;
+                if (portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice)
+                {
+                    telegramGiftId = string.Concat(tonnelGiftFirst.Name?.Where(char.IsLetter) ?? string.Empty)
+                                     + '-' + tonnelGiftFirst.GiftNum;
+                    tgGiftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
+                    gift = new Gift(tonnelGiftFirst.Name!, tonnelGiftFirst.Model!, tonnelGiftFirst.Backdrop!,
+                        tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
+                        (double)tonnelGiftFirst.GiftId!,
+                        activity,
+                        $"https://t.me/nft/{telegramGiftId}",
+                        $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
+                        $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
+                        tgGiftInfo.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                        historyData[0].Price!.Value);
+                }
+
+                // gift =
+                //     portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
+                //         ? 
+                //         : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
+                //             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                //             portalsGift.ExternalCollectionNumber ?? throw new Exception("ExternalCollectionNumber is null"), activity,
+                //             $"https://t.me/nft/{portalsGift.ExternalCollectionNumber}",
+                //             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
+                //             null, "portals", tgGiftInfo.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                //             historyData[0].Price!.Value);
                 await MathSecondFloor(gift, tonnelSearchResults!, Criteria.SecondFloorWithBackdrop);
                 // backdrop false
-                portalsGift = await PortalsCheckGift(giftInfo, false);
+                portalsGift = await PortalsCheckGift(telegramGiftId, giftInfo, false);
                 portalsCurrentPrice = portalsGift?.Price != null
                     ? double.Parse(portalsGift.Price, CultureInfo.InvariantCulture)
                     : null;
@@ -164,35 +185,48 @@ public class Parser : IAsyncDisposable
                 tonnelGiftFirst = tonnelSearchResults?.MinBy(x => x.Price);
                 if (tonnelGiftFirst == null) continue;
 
-                tonnelCurrentPrice = tonnelGiftFirst?.Price + tonnelGiftFirst?.Price * 0.04;
-                gift =
-                    portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice
-                        ? new Gift(giftInfo.Item2.Name!, tonnelGiftFirst!.Model!, tonnelGiftFirst.Backdrop!,
-                            tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
-                            (double)tonnelGiftFirst.GiftId!,
-                            activity,
-                            $"https://t.me/nft/{giftInfo.Item1.Id}",
-                            $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
-                            $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
-                            giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
-                            portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            long.Parse(portalsGift.TgId!), activity,
-                            $"https://t.me/nft/{portalsGift.TgId}",
-                            $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
-                            null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
-                            historyData[0].Price!.Value);
+                tonnelCurrentPrice = tonnelGiftFirst.Price + tonnelGiftFirst.Price * 0.04;
+                if (portalsCurrentPrice is null || portalsCurrentPrice > tonnelCurrentPrice)
+                {
+                    telegramGiftId = string.Concat(tonnelGiftFirst.Name?.Where(char.IsLetter) ?? string.Empty)
+                                     + '-' + tonnelGiftFirst.GiftNum;
+                    tgGiftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
+                    gift = new Gift(tonnelGiftFirst.Name!, tonnelGiftFirst.Model!, tonnelGiftFirst.Backdrop!,
+                        tonnelCurrentPrice ?? throw new Exception("Tonnel current price is null."),
+                        (double)tonnelGiftFirst.GiftId!,
+                        activity,
+                        $"https://t.me/nft/{telegramGiftId}",
+                        $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftFirst.GiftId}",
+                        $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
+                        tgGiftInfo.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
+                        historyData[0].Price!.Value);
+                }
+                else
+                {
+                    telegramGiftId = string.Concat(portalsGift?.Name?.Where(char.IsLetter) ?? string.Empty)
+                                     + '-' + portalsGift!.ExternalCollectionNumber;
+                    tgGiftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
+                    gift = new Gift(portalsGift.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!,
+                        portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
+                        portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
+                        portalsGift.ExternalCollectionNumber ?? throw new Exception("ExternalCollectionNumber is null"),
+                        activity,
+                        $"https://t.me/nft/{telegramGiftId}",
+                        $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
+                        null, "portals", tgGiftInfo.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
+                        historyData[0].Price!.Value);
+                }
+
                 await MathSecondFloor(gift, tonnelSearchResults!, Criteria.SecondFloor);
             }
             catch (Exception ex)
             {
-                Logger.Warn($"Ошибка при обработке подарка {giftInfo.Item1.Id}: {ex.Message}");
+                Logger.Warn($"Ошибка при обработке подарка {telegramGiftId}: {ex.Message}");
             }
         }
     }
 
-    private async Task<TonnelRelayerHistoryGiftInfo[]?> GetTonnelActivity((GiftInfo, TonnelRelayerGiftInfo) giftInfo)
+    private async Task<TonnelRelayerHistoryGiftInfo[]?> GetTonnelActivity(TonnelRelayerGiftInfo giftInfo)
     {
         var response = await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelRelayerHistoryGiftInfo[], object>(
             "https://gifts3.tonnel.network/api/saleHistory",
@@ -204,9 +238,9 @@ public class Parser : IAsyncDisposable
                 type = "ALL",
                 filter = new
                 {
-                    gift_name = giftInfo.Item2.Name,
-                    model = giftInfo.Item2.Model,
-                    backdrop = giftInfo.Item2.Backdrop
+                    gift_name = giftInfo.Name,
+                    model = giftInfo.Model,
+                    backdrop = giftInfo.Backdrop
                 },
                 sort = new { timestamp = -1, gift_id = -1 }
             });
@@ -214,7 +248,7 @@ public class Parser : IAsyncDisposable
         return response;
     }
 
-    private async Task<TonnelSearch[]?> GetTonnelSearchResults((GiftInfo, TonnelRelayerGiftInfo) giftInfo,
+    private async Task<TonnelSearch[]?> GetTonnelSearchResults(TonnelRelayerGiftInfo giftInfo,
         bool searchBackdrop = true)
     {
         var response = await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelSearch[], object>(
@@ -225,9 +259,9 @@ public class Parser : IAsyncDisposable
                 sort = "{\"price\":1,\"gift_id\":-1}",
                 filter =
                     "{\"price\":{\"$exists\":true},\"buyer\":{\"$exists\":false},\"gift_name\":\"" +
-                    giftInfo.Item2.Name + "\",\"model\":\"" + giftInfo.Item2.Model + "\"," + (searchBackdrop
+                    giftInfo.Name + "\",\"model\":\"" + giftInfo.Model + "\"," + (searchBackdrop
                         ? "\"backdrop\":{\"$in\":[\"" +
-                          giftInfo.Item2.Backdrop + "\"]},"
+                          giftInfo.Backdrop + "\"]},"
                         : string.Empty) + "\"asset\":\"TON\"}",
                 @ref = 0,
                 price_range = (object?)null,
@@ -393,37 +427,37 @@ public class Parser : IAsyncDisposable
 //         return false;
 //     }
 
-    private async Task<PortalsSearch.Result?> PortalsCheckGift((GiftInfo, TonnelRelayerGiftInfo) giftInfo,
+    private async Task<PortalsSearch.Result?> PortalsCheckGift(string telegramGiftId, TonnelRelayerGiftInfo giftInfo,
         bool searchBackdrop = true)
     {
         try
         {
-            var backdrop = giftInfo.Item2.Backdrop!;
+            var backdrop = giftInfo.Backdrop!;
             var backdropTrimmed = backdrop[..backdrop.LastIndexOf(' ')];
-            var model = giftInfo.Item2.Model!;
+            var model = giftInfo.Model!;
             var modelTrimmed = model[..model.LastIndexOf(' ')];
             var url = "https://portals-market.com/api/nfts/search?offset=0&limit=20" +
                       (searchBackdrop ? $"&filter_by_backdrops={backdropTrimmed.Replace(' ', '+')}" : string.Empty) +
-                      $"&filter_by_collections={giftInfo.Item2.Name?.Replace(' ', '+')}" +
+                      $"&filter_by_collections={giftInfo.Name?.Replace(' ', '+')}" +
                       $"&filter_by_models={modelTrimmed.Replace(' ', '+')}" +
                       "&sort_by=price+asc" +
                       "&status=listed";
             using var response = await _portalsHttpClientPool.SendAsync(url, HttpMethod.Get);
             if (!response.IsSuccessStatusCode)
             {
-                Logger.Warn($"Ошибка при получении подарка {giftInfo.Item2.GiftId} на порталах: {response.StatusCode}");
+                Logger.Warn($"Ошибка при получении подарка {giftInfo.GiftId} на порталах: {response.StatusCode}");
                 return null;
             }
 
             var responseData = await response.Content.ReadFromJsonAsync<PortalsSearch>();
             if (responseData?.Results != null && responseData.Results.Length != 0)
                 return responseData.Results[0];
-            Logger.Warn($"Подарок {giftInfo.Item1.Id} не найден на порталах.");
+            Logger.Warn($"Подарок {telegramGiftId} не найден на порталах.");
             return null;
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, $"Ошибка при проверке подарка {giftInfo.Item1.Id} на порталах.");
+            Logger.Error(ex, $"Ошибка при проверке подарка {telegramGiftId} на порталах.");
         }
 
         return null;
@@ -471,10 +505,7 @@ public class Parser : IAsyncDisposable
             foreach (var tonnelRelayerGiftInfo in response)
                 try
                 {
-                    var telegramGiftId = string.Concat(tonnelRelayerGiftInfo.Name?.Where(char.IsLetter) ?? string.Empty)
-                                         + '-' + tonnelRelayerGiftInfo.GiftNum;
-                    var giftInfo = await GiftManager.GetGiftInfoAsync(telegramGiftId);
-                    await _giftInfos.Writer.WriteAsync((giftInfo, tonnelRelayerGiftInfo));
+                    await _giftInfos.Writer.WriteAsync(tonnelRelayerGiftInfo);
                 }
                 catch (Exception e)
                 {
