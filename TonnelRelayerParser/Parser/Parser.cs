@@ -120,9 +120,9 @@ public class Parser : IAsyncDisposable
                             $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}", "tonnel",
                             giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
                             historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
                             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            giftInfo.Item2.GiftId, activity,
+                            long.Parse(portalsGift.TgId!), activity,
                             $"https://t.me/nft/{portalsGift.TgId}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
                             null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
@@ -147,10 +147,10 @@ public class Parser : IAsyncDisposable
                             $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
                             giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
                             historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
                             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            giftInfo.Item2.GiftId, activity,
-                            $"https://t.me/nft/{giftInfo.Item1.Id}",
+                            long.Parse(portalsGift.TgId!), activity,
+                            $"https://t.me/nft/{portalsGift.TgId}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
                             null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
                             historyData[0].Price!.Value);
@@ -176,10 +176,10 @@ public class Parser : IAsyncDisposable
                             $"https://market.tonnel.network/?giftDrawerId={tonnelGiftFirst.GiftId}", "tonnel",
                             giftInfo.Item1.IsSold, portalsCurrentPrice, historyData[0].Timestamp!.Value,
                             historyData[0].Price!.Value)
-                        : new Gift(portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
+                        : new Gift(portalsGift!.Name!, portalsGift.Attributes!.First(x => x.Type == "model").Value!, portalsGift.Attributes!.First(x => x.Type == "backdrop").Value!,
                             portalsCurrentPrice ?? throw new Exception("Portals current price is null."),
-                            giftInfo.Item2.GiftId, activity,
-                            $"https://t.me/nft/{giftInfo.Item1.Id}",
+                            long.Parse(portalsGift.TgId!), activity,
+                            $"https://t.me/nft/{portalsGift.TgId}",
                             $"https://t.me/portals/market?startapp=gift_{portalsGift.Id}",
                             null, "portals", giftInfo.Item1.IsSold, tonnelCurrentPrice, historyData[0].Timestamp!.Value,
                             historyData[0].Price!.Value);
