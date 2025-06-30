@@ -11,6 +11,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using Gift = Moahk.Parser.Gift;
 using User = Telegram.Bot.Types.User;
 
 namespace Moahk;
@@ -216,11 +217,7 @@ public class TelegramBot : IDisposable
                                                     Лицензия: {foundUser.License:yyyy-MM-dd HH:mm} UTC
                                                     Диапазон цен: {foundUser.PriceMin:0.00} - {foundUser.PriceMax:0.00}
                                                     Процент прибыли: {foundUser.ProfitPercent}%
-                                                    Критерии: {foundUser.Criteria switch {
-                                                        Criteria.Peak => "сравнение с самой высокой цене за 2 недели",
-                                                        Criteria.Percentile75 => "75-й процентиль",
-                                                        Criteria.SecondFloor => "Разница с 2ым флором",
-                                                        _ => string.Empty }}
+                                                    Критерии: {CriteriaToString(foundUser.Criteria)}
                                                     Статус: {foundUser.Status}
                                                     Запущено: {foundUser.IsStarted}
                                                     """);
@@ -294,10 +291,8 @@ public class TelegramBot : IDisposable
             case "criteria":
                 await CriteriaCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
-            case "criteria_peak":
-            case "criteria_percentile75":
             case "criteria_second_floor":
-            case "criteria_second_floor_with_backdrop":
+            case "criteria_second_floor_without_backdrop":
                 await CriteriaSetCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "renew_license_1":
@@ -504,11 +499,9 @@ public class TelegramBot : IDisposable
     {
         return criteria switch
         {
-            Criteria.Peak => "Сравнение с максимальной ценой продажи или покупки  за последние  2 недели",
-            Criteria.Percentile75 => "Сравнение по 75 процентилю с ценами продажи или покупки  за последние  2 недели",
             Criteria.SecondFloor => "Сравнение со вторым по дешевизне таким же подарком в продаже",
-            Criteria.SecondFloorWithBackdrop =>
-                "Сравнение со вторым по дешевизне таким же подарком в продаже с учётом фона",
+            Criteria.SecondFloorWithoutBackdrop =>
+                "Сравнение со вторым по дешевизне таким же подарком в продаже без фона",
             _ => string.Empty
         };
     }
@@ -710,12 +703,8 @@ public class TelegramBot : IDisposable
 
         var keyboard = new InlineKeyboardMarkup([
             [
-                InlineKeyboardButton.WithCallbackData("📈 Макс.", "criteria_peak"),
-                InlineKeyboardButton.WithCallbackData("📊 75%", "criteria_percentile75"),
-                InlineKeyboardButton.WithCallbackData("🔄 2 флор", "criteria_second_floor")
-            ],
-            [
-                InlineKeyboardButton.WithCallbackData("🔄 2 флор + фон", "criteria_second_floor_with_backdrop")
+                InlineKeyboardButton.WithCallbackData("🔄 2 флор", "criteria_second_floor"),
+                InlineKeyboardButton.WithCallbackData("🔄 2 флор без фона", "criteria_second_floor_without_backdrop")
             ],
             [
                 InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
@@ -724,12 +713,9 @@ public class TelegramBot : IDisposable
         var msgText = $"""
                        📊 Критерии оценки выгоды
 
-                       1 - Сравнение с максимальной ценой продажи или покупки  за последние  2 недели
+                       1 - Сравнение со вторым по дешевизне таким же подарком в продаже
 
-                       2 - Сравнение по 75 процентилю с ценами продажи или покупки  за последние  2 недели 
-
-                       3 - Сравнение со вторым по дешевизне таким же подарком в продаже
-
+                       2 - Сравнение со вторым по дешевизне таким же подарком в продаже без фона
 
                        Текущий критерий: {CriteriaToString(user.Criteria)}
 
@@ -745,10 +731,8 @@ public class TelegramBot : IDisposable
     {
         var criteria = callbackQuery.Data switch
         {
-            "criteria_peak" => Criteria.Peak,
-            "criteria_percentile75" => Criteria.Percentile75,
             "criteria_second_floor" => Criteria.SecondFloor,
-            "criteria_second_floor_with_backdrop" => Criteria.SecondFloorWithBackdrop,
+            "criteria_second_floor_without_backdrop" => Criteria.SecondFloorWithoutBackdrop,
             _ => user.Criteria
         };
         user.Criteria = criteria;
@@ -800,29 +784,44 @@ public class TelegramBot : IDisposable
     {
         var msgText = $"""
                        🔍 Как работает бот?
-                       Бот постоянно сканирует маркетплейсы Tonnel и Portals, анализирует цены, активность продаж, находит и помечает "грязные" подарки ( подарки с подписью)  и находит самые выгодные  подарки  согласно вашим фильтрам.
+                       Бот постоянно сканирует маркетплейсы Tonnel и Portals, анализирует цены, активность продаж, находит и помечает "грязные" подарки ( подарки с подписью)  и находит самые выгодные  подарки .
 
 
                        📊 Критерии оценки выгоды
 
-                       1 - Поиск новых подарков и сравнение с максимальной ценой продажи или покупки  за последние  2 недели ( С УЧЕТОМ ФОНА ) 
+                       1 - Сравнение со вторым по дешевизне таким же подарком в продаже
 
-                       2 - Поиск новых подарков и сравнение по 75 процентилю с ценами продажи или покупки  за последние  2 недели ( С УЧЕТОМ ФОНА ) 
-
-                       3 - Поиск самых дешевых подарков и сравнение со вторым по дешевизне таким же подарком в продаже ( БЕЗ УЧЕТА ФОНА - только по модели ) 
-
-                       4 - Поиск самых дешевых подарков и сравнение со вторым по дешевизне таким же подарком в продаже ( С УЧЕТОМ ФОНА ) 
+                       2 - Сравнение со вторым по дешевизне таким же подарком в продаже без фона
 
 
                        💰 Как рассчитывается выгода?
-                       -Перспектива показывает потенциальную выгоду для перепродажи подарка в процентах, высчитывается от заданного критерия оценки. Естественно это лишь приближенные данные - никаких гарантий бот дать не может.
+                       -Перспектива показывает процентную разницу между первым флором и вторым флором на маркетах. 
+                       Проще говоря разницу в цене между самым дешевым подарком и вторым по дешевизне в продаже.
 
                        ⏰ Как часто приходят уведомления?
-                       Уведомления приходят сразу при обнаружении подходящего предложения. Частота зависит от ваших фильтров.
+                       Уведомления приходят сразу при обнаружении подходящего предложения. 
 
                        🎁 Какие подарки ищет бот?
                        Все виды Telegram подарков, доступных на маркетплейсах Tonnel и Portals.
 
+                       🩻 Что означает каждая строка в выводе?
+
+                       Найдено на: TONNEL
+                       💲 Текущая цена: 15,60 TON
+                       💹 Перспектива: +50,00% (разница между 1 и 2м флором)
+                       ❌ Состояние: Грязный  (с подписью или без )
+                       🔥 Активность: Низкая (насколько часто торгуется подарок)
+
+                       --- АНАЛИЗ РЫНКА (В продаже) ---
+                       💰 Второй флор: 31,20 TON (второй самый дешевый подобный подарок)
+                       💰 Самый дешевый на PORTALS: 25,00 TON (Флор на соседнем маркете)
+
+                       --- АНАЛИЗ ИСТОРИИ ---
+                       📉 Нижний уровень цен (25%): 11,99 TON ( 25ый процентиль из истории продаж)
+                       📈 Высокий уровень цен (75%): 11,99 TON ( 75ый процентиль из истории продаж)
+                       🚀 Максимальная цена (за 7д.): 11,99 TON ( максимальная цена проданного подарка за последние 7 дней)
+
+                       Анализ истории высчитывается исходя из истории за 7 дней и может не отображать действительность из за быстрых изменений рынка
 
                        Контакты для связи - https://t.me/retrowaiver
 
@@ -853,55 +852,76 @@ public class TelegramBot : IDisposable
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
-    public async Task SendSignal(string name, string model, double price, double percentDiff, bool isSold,
-        Activity activity,
-        string tgUrl, string botUrl,
-        string? siteUrl, string botName, Criteria criteria, double? alternativePrice, DateTimeOffset lastActivity,
-        double lastActivityPrice, string backdrop)
+    public async Task SendSignal(Gift gift, double percentDiff, double secondFloorPrice, double? percentile25,
+        double? percentile75, double? lastOneWeekMaxPrice, Criteria criteria)
 
     {
         await using var dbContext = new ApplicationDbContext();
         var users = await dbContext.Users
             .AsNoTracking()
             .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                        x.PriceMin <= price && x.PriceMax >= price && x.ProfitPercent <= percentDiff)
+                        x.PriceMin <= gift.Price && x.PriceMax >= gift.Price && x.ProfitPercent <= percentDiff)
             .ToArrayAsync();
+//         var msg = $"""
+//                    [🎁]({tgUrl})  *{name} | {model} | {backdrop}* 🎨
+//
+//                    🔀{botName.ToUpper()}
+//
+//                    ━━━━━━━━━━━━━━━━━━━ 
+//                    💲 *Цена*: {price:F2} TON
+//                    💹 *Перспектива*: +{percentDiff:F2}%
+//                    {(isSold ? "❌ *Состояние*: Грязный" : "✅ *Состояние*: Чистый")}  
+//                    🔥 *Активность*: {activity switch
+//                    {
+//                        Activity.Low => "Низкая",
+//                        Activity.Medium => "Средняя",
+//                        _ => "Высокая"
+//                    }}
+//                    📊 Цена последней сделки: {lastActivityPrice:F2} TON
+//                    ━━━━━━━━━━━━━━━━━━━ 
+//                    {(alternativePrice is not null ? $"""
+//                                                      🔀{(botName switch {
+//                                                          "portals" => "tonnel",
+//                                                          "tonnel" => "portals",
+//                                                          _ => throw new ArgumentOutOfRangeException(nameof(botName), botName, null) }).ToUpper()}
+//
+//                                                      ━━━━━━━━━━━━━━━━━━━ 
+//                                                      💲 *Цена*: {alternativePrice:F2} TON
+//                                                      ━━━━━━━━━━━━━━━━━━━ 
+//                                                      """ : string.Empty)}
+//                    """;
+        var telegramUrl = $"https://t.me/nft/{gift.TelegramGiftId}";
+        var bot = gift.Bot.ToString().ToUpper();
         var msg = $"""
-                   [🎁]({tgUrl})  *{name} | {model} | {backdrop}* 🎨
+                   [🎁]({telegramUrl}) *{gift.Name} | {gift.Model} | {gift.Backdrop}* 🎨
 
-                   🔀{botName.ToUpper()}
-
-                   ━━━━━━━━━━━━━━━━━━━ 
-                   💲 *Цена*: {price:F2} TON
-                   💹 *Перспектива*: +{percentDiff:F2}%
-                   {(isSold ? "❌ *Состояние*: Грязный" : "✅ *Состояние*: Чистый")}  
-                   🔥 *Активность*: {activity switch
-                   {
+                   📍 *Найдено на:* {bot}
+                   💲 *Текущая цена:* {gift.Price:F2} TON
+                   💹 *Перспектива:* +{percentDiff:F2}%
+                   {((bool)gift.IsSold! ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}  
+                   🔥 *Активность:* {gift.Activity switch {
                        Activity.Low => "Низкая",
                        Activity.Medium => "Средняя",
                        _ => "Высокая"
                    }}
-                   📊 Цена последней сделки: {lastActivityPrice:F2} TON
-                   ━━━━━━━━━━━━━━━━━━━ 
-                   {(alternativePrice is not null ? $"""
-                                                     🔀{(botName switch {
-                                                         "portals" => "tonnel",
-                                                         "tonnel" => "portals",
-                                                         _ => throw new ArgumentOutOfRangeException(nameof(botName), botName, null) }).ToUpper()}
 
-                                                     ━━━━━━━━━━━━━━━━━━━ 
-                                                     💲 *Цена*: {alternativePrice:F2} TON
-                                                     ━━━━━━━━━━━━━━━━━━━ 
-                                                     """ : string.Empty)}
+                   --- АНАЛИЗ РЫНКА (В продаже) ---
+                   💰 *Второй флор:* {secondFloorPrice:F2} TON
+                   {(gift.AlternativePrice is not null ? $"💰 *Самый дешевый на {gift.AlternativeBot.ToString().ToUpper()}:* {gift.AlternativePrice:F2} TON" : string.Empty)}
+
+                   --- ПРОГНОЗ ПРОДАЖИ (История сделок) ---
+                   📉 *Нижний уровень цен (25%):* {(percentile25 is not null ? $"{percentile25:F2} TON" : "Недостаточно данных")}
+                   📈 *Высокий уровень цен (75%):* {(percentile75 is not null ? $"{percentile75:F2} TON" : "Недостаточно данных")}
+                   🚀 *Максимальная цена (за 7д.):* {(lastOneWeekMaxPrice is not null ? $"{lastOneWeekMaxPrice:F2} TON" : "Недостаточно данных")}
                    """;
         var buttons = new List<List<InlineKeyboardButton>>([
             [
-                InlineKeyboardButton.WithUrl("Подарок", tgUrl),
-                InlineKeyboardButton.WithUrl(botName.ToUpper(), botUrl)
+                InlineKeyboardButton.WithUrl("Подарок", telegramUrl),
+                InlineKeyboardButton.WithUrl(bot, gift.BotUrl)
             ]
         ]);
-        if (siteUrl != null)
-            buttons.Add([InlineKeyboardButton.WithUrl("Сайт", siteUrl)]);
+        if (gift.SiteUrl != null)
+            buttons.Add([InlineKeyboardButton.WithUrl("Сайт", gift.SiteUrl)]);
         var keyboard = new InlineKeyboardMarkup(buttons);
         foreach (var user in users)
             try

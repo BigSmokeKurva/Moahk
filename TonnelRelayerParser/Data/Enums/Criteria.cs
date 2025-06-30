@@ -2,8 +2,6 @@
 
 public enum Criteria
 {
-    Peak,
-    Percentile75,
     SecondFloor,
-    SecondFloorWithBackdrop
+    SecondFloorWithoutBackdrop
 }
