@@ -20,7 +20,7 @@ public class Gift
     public required string BotUrl { get; init; }
     public string? SiteUrl { get; init; }
     public required Bot Bot { get; init; }
-    public bool? IsSold { get; set; }
+    public GiftInfo? GiftInfo { get; set; }
 
     public required Bot AlternativeBot { get; init; }
     public double? AlternativePrice { get; init; }
@@ -450,10 +450,10 @@ public class Parser : IAsyncDisposable
         }
 
         var lastTwoWeeksMaxPrice = lastOneWeekMaxPrice.OrderByDescending(x => x.Price).FirstOrDefault()?.Price;
-        if (gift.IsSold is null)
+        if (gift.GiftInfo is null)
         {
             var telegramGiftInfo = await GiftManager.GetGiftInfoAsync(gift.TelegramGiftId);
-            gift.IsSold = telegramGiftInfo.IsSold;
+            gift.GiftInfo = telegramGiftInfo;
         }
 
         await _telegramBot.SendSignal(gift, percentDiff, secondFloorPrice, percentile25, percentile75,

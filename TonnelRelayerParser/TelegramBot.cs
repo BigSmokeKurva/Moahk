@@ -105,6 +105,9 @@ public class TelegramBot : IDisposable
             case not null when user.Status == Status.WritingProfitPercent:
                 await ProfitSetCustomValue(msg, dbContext, user);
                 break;
+            case not null when user.Status == Status.WritingModelPercent:
+                await ModelPercentSetValue(msg, dbContext, user);
+                break;
         }
     }
 
@@ -137,7 +140,8 @@ public class TelegramBot : IDisposable
         if (isNew && long.TryParse(args, out var referrerId)) user.ReferrerId = referrerId;
         user.Status = Status.None;
         await dbContext.SaveChangesAsync();
-        var (keyboard, msgText) = GetMainMenuMessage(user, isNew || user.License is null || user.License < DateTimeOffset.UtcNow);
+        var (keyboard, msgText) =
+            GetMainMenuMessage(user, isNew || user.License is null || user.License < DateTimeOffset.UtcNow);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
@@ -254,7 +258,8 @@ public class TelegramBot : IDisposable
 
         foundUser.License = newTime;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(msg.From!.Id, $"Лицензия пользователя {foundUser.Id} успешно изменена на {newTime:yyyy-MM-dd HH:mm} UTC.");
+        await _botClient.SendMessage(msg.From!.Id,
+            $"Лицензия пользователя {foundUser.Id} успешно изменена на {newTime:yyyy-MM-dd HH:mm} UTC.");
     }
 
     private async Task AdminSetReferralBalanceCommand(Message msg, string args, ApplicationDbContext dbContext,
@@ -268,15 +273,18 @@ public class TelegramBot : IDisposable
                 "Неверный формат. Используйте: /set_referral_balance <user_id> <new_balance>");
             return;
         }
+
         var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == userId);
         if (foundUser is null)
         {
             await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
             return;
         }
+
         foundUser.ReferralBalance = newBalance;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(msg.From!.Id, $"Баланс рефералов пользователя {foundUser.Id} успешно изменен на {newBalance} USDT.");
+        await _botClient.SendMessage(msg.From!.Id,
+            $"Баланс рефералов пользователя {foundUser.Id} успешно изменен на {newBalance} USDT.");
     }
 
     private async Task AdminSetReferralPercentCommand(Message msg, string args, ApplicationDbContext dbContext,
@@ -290,15 +298,18 @@ public class TelegramBot : IDisposable
                 "Неверный формат. Используйте: /set_referral_percent <user_id> <new_percent>");
             return;
         }
+
         var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == userId);
         if (foundUser is null)
         {
             await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
             return;
         }
+
         foundUser.ReferralPercent = newPercent;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(msg.From!.Id, $"Процент рефералов пользователя {foundUser.Id} успешно изменен на {newPercent}%.");
+        await _botClient.SendMessage(msg.From!.Id,
+            $"Процент рефералов пользователя {foundUser.Id} успешно изменен на {newPercent}%.");
     }
 
     private async Task OnUpdate(Update update)
@@ -344,6 +355,9 @@ public class TelegramBot : IDisposable
             case "criteria_second_floor":
             case "criteria_second_floor_without_backdrop":
                 await CriteriaSetCallbackQuery(callbackQuery, dbContext, user.user);
+                break;
+            case "model_percent":
+                await ModelPercentCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "renew_license_1":
             case "renew_license_30":
@@ -418,7 +432,8 @@ public class TelegramBot : IDisposable
             ]
         ]);
         await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
-            $"Вы выбрали продление лицензии на {days} {DaysFormat(days)}. Выберите способ оплаты:", replyMarkup: keyboard);
+            $"Вы выбрали продление лицензии на {days} {DaysFormat(days)}. Выберите способ оплаты:",
+            replyMarkup: keyboard);
     }
 
     private async Task RenewLicenseCrystalpayCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -514,12 +529,12 @@ public class TelegramBot : IDisposable
             return;
         }
 
-         if (invoiceInfo.State != "payed")
-         {
-             await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не оплачен.");
-             return;
-         }
-        
+        if (invoiceInfo.State != "payed")
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не оплачен.");
+            return;
+        }
+
         if (user.ReferrerId is not null && user.License is null)
         {
             var referrer = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == user.ReferrerId);
@@ -541,6 +556,7 @@ public class TelegramBot : IDisposable
                 }
             }
         }
+
         user.License = user.License is null || user.License < DateTimeOffset.Now
             ? DateTimeOffset.UtcNow.AddDays(crystalpayInvoice.Days)
             : user.License!.Value.AddDays(crystalpayInvoice.Days);
@@ -554,9 +570,10 @@ public class TelegramBot : IDisposable
             Приватка -  https://t.me/+CcNTT5q3T7U1ZTIy
             """, replyMarkup: InlineKeyboardMarkup.Empty());
         await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Лицензия успешно продлена на {crystalpayInvoice.Days} {DaysFormat(crystalpayInvoice.Days)}", replyMarkup: keyboard);
+            $"Лицензия успешно продлена на {crystalpayInvoice.Days} {DaysFormat(crystalpayInvoice.Days)}",
+            replyMarkup: keyboard);
     }
-    
+
     private string DaysFormat(int days)
     {
         return days switch
@@ -594,7 +611,8 @@ public class TelegramBot : IDisposable
                 InlineKeyboardButton.WithCallbackData("📈 Процент выгоды", "profit")
             ],
             [
-                InlineKeyboardButton.WithCallbackData("📊 Критерии оценки", "criteria")
+                InlineKeyboardButton.WithCallbackData("📊 Критерии оценки", "criteria"),
+                InlineKeyboardButton.WithCallbackData("🎯 Процент редкости", "model_percent")
             ]
         ]);
         var msgText = $"""
@@ -603,6 +621,7 @@ public class TelegramBot : IDisposable
                        💰 Диапазон цен: {user.PriceMin} - {user.PriceMax} TON
                        📈 Минимальная выгода: {user.ProfitPercent}%
                        📊 Критерии оценки: {CriteriaToString(user.Criteria)}
+                       🎯 Процент редкости: {user.ModelPercentMin}% - {user.ModelPercentMax}%
 
                        Настройте фильтры под свои предпочтения:
                        """;
@@ -658,6 +677,59 @@ public class TelegramBot : IDisposable
         // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
         await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
             msgText, replyMarkup: keyboard);
+    }
+
+    private async Task ModelPercentCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (await CheckLicense(user))
+            return;
+        user.Status = Status.WritingModelPercent;
+        await dbContext.SaveChangesAsync();
+        var msgText = $"""
+                       🎯 Настройка процента редкости
+
+                       Текущий диапазон: {user.ModelPercentMin}% - {user.ModelPercentMax}%
+
+                       Введите новый диапазон в формате:
+                       минимальный_процент максимальный_процент
+                       Примеры:
+                       - 1 5
+                       - 0.5 10
+                       """;
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
+            ]
+        ]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
+    }
+
+    public async Task ModelPercentSetValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
+    {
+        var parts = msg.Text?.Replace(',', '.').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts is not { Length: 2 } ||
+            !double.TryParse(parts[0], CultureInfo.InvariantCulture, out var min) ||
+            !double.TryParse(parts[1], CultureInfo.InvariantCulture, out var max) || min < 0 ||
+            max < 0 || min >= max)
+        {
+            await _botClient.SendMessage(msg.From!.Id, """
+                                                       ❌ Неверный формат
+
+                                                       Пожалуйста, введите проценты в правильном формате:
+                                                       минимальный_процент максимальный_процент
+                                                       """);
+            return;
+        }
+
+        user.ModelPercentMin = min;
+        user.ModelPercentMax = max;
+        user.Status = Status.None;
+        await dbContext.SaveChangesAsync();
+        await FiltersTextCommand(msg, dbContext, user);
     }
 
     private async Task PriceRangeSetValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
@@ -837,6 +909,7 @@ public class TelegramBot : IDisposable
                        💰 Цена: {user.PriceMin} - {user.PriceMax} TON
                        📈 Выгода: от {user.ProfitPercent}%
                        📊 Критерий: {CriteriaToString(user.Criteria)}
+                       🎯 Процент редкости: {user.ModelPercentMin}% - {user.ModelPercentMax}%
                        """;
         var (keyboard, _) = GetMainMenuMessage(user, user.License is null || user.License < DateTimeOffset.UtcNow);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
@@ -917,16 +990,16 @@ public class TelegramBot : IDisposable
     private async Task StatusTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        var hoursDiff = user.License is not null ?(user.License - DateTimeOffset.UtcNow).Value.TotalHours : -1;
+        var hoursDiff = user.License is not null ? (user.License - DateTimeOffset.UtcNow).Value.TotalHours : -1;
         var msgText = $"""
                        💎 *Подписка:* {(hoursDiff > 0 ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Неактивна")}
                        🔍 *Поиск:* {(user.IsStarted ? "▶️ Запущен" : "⏹️ Остановлен")}
-                       
+
                        ---💰РЕФЕРАЛЬНАЯ ПРОГРАММА--- 
                        📊 *Процент:* {user.ReferralPercent:F2}%
                        👥 *Приглашено:* {await dbContext.Users.CountAsync(x => x.ReferrerId == user.Id)}
                        💵 *Заработано:* {user.ReferralBalance:F2} USDT
-                       
+
                        {(hoursDiff is <= 24 and > 0 ? "⚠️ Подписка скоро истечёт! Продлите её, чтобы не пропустить выгодные предложения." : string.Empty)}
                        """;
         var buttons = new List<List<InlineKeyboardButton>>([
@@ -939,7 +1012,7 @@ public class TelegramBot : IDisposable
             ]
         ]);
         var keyboard = new InlineKeyboardMarkup(buttons);
-        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard, parseMode:ParseMode.Markdown);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
     }
 
     public async Task SendSignal(Gift gift, double percentDiff, double secondFloorPrice, double? percentile25,
@@ -950,7 +1023,9 @@ public class TelegramBot : IDisposable
         var users = await dbContext.Users
             .AsNoTracking()
             .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                        x.PriceMin <= gift.Price && x.PriceMax >= gift.Price && x.ProfitPercent <= percentDiff)
+                        x.PriceMin <= gift.Price && x.PriceMax >= gift.Price && x.ProfitPercent <= percentDiff &&
+                        x.ModelPercentMin <= gift.GiftInfo!.Value.Model.Item2 &&
+                        x.ModelPercentMax >= gift.GiftInfo.Value.Model.Item2)
             .ToArrayAsync();
 //         var msg = $"""
 //                    [🎁]({tgUrl})  *{name} | {model} | {backdrop}* 🎨
@@ -983,12 +1058,12 @@ public class TelegramBot : IDisposable
         var telegramUrl = $"https://t.me/nft/{gift.TelegramGiftId}";
         var bot = gift.Bot.ToString().ToUpper();
         var msg = $"""
-                   [🎁]({telegramUrl}) *{gift.Name} | {gift.Model} | {gift.Backdrop}* 🎨
+                   [🎁]({telegramUrl}) *{gift.Name} | {gift.GiftInfo!.Value.Model.Item1} ({gift.GiftInfo.Value.Model.Item2:F1}%) | {gift.GiftInfo.Value.Backdrop.Item1} ({gift.GiftInfo.Value.Backdrop.Item2:F1}%)* 🎨
 
                    📍 *Найдено на:* {bot}
                    💲 *Текущая цена:* {gift.Price:F2} TON
                    💹 *Перспектива:* +{percentDiff:F2}%
-                   {((bool)gift.IsSold! ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}  
+                   {(gift.GiftInfo!.Value.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}  
                    🔥 *Активность:* {gift.Activity switch {
                        Activity.Low => "Низкая",
                        Activity.Medium => "Средняя",

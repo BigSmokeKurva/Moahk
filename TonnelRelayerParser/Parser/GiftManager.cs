@@ -15,13 +15,13 @@ public static class GiftManager
         var response = await Client.GetStringAsync($"https://t.me/nft/{giftId}");
         using var document = await Parser.ParseDocumentAsync(response);
         var modelElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(2) > td:nth-child(2)");
-        var model = modelElement?.TextContent;
+        var model = modelElement?.TextContent.Split(' ')[0];
         var modelPercentage = modelElement?.QuerySelector("mark")?.TextContent;
         var backdropElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(3) > td:nth-child(2)");
-        var backdrop = backdropElement?.TextContent;
+        var backdrop = backdropElement?.TextContent.Split(' ')[0];
         var backdropPercentage = backdropElement?.QuerySelector("mark")?.TextContent;
         var symbolElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)");
-        var symbol = symbolElement?.TextContent;
+        var symbol = symbolElement?.TextContent.Split(' ')[0];
         var symbolPercentage = symbolElement?.QuerySelector("mark")?.TextContent;
         var quantityElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(5) > td:nth-child(2)");
         var quantityText = quantityElement?.TextContent;

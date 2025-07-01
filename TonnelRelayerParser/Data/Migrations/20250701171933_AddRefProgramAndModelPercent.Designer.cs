@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Moahk.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250701161931_AddReferralProgram")]
-    partial class AddReferralProgram
+    [Migration("20250701171933_AddRefProgramAndModelPercent")]
+    partial class AddRefProgramAndModelPercent
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -65,7 +65,9 @@ namespace Moahk.Data.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<int>("Criteria")
-                        .HasColumnType("integer");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<bool>("IsStarted")
                         .HasColumnType("boolean");
@@ -73,26 +75,42 @@ namespace Moahk.Data.Migrations
                     b.Property<DateTimeOffset?>("License")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<double>("PriceMax")
+                    b.Property<double>("ModelPercentMax")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(100.0);
+
+                    b.Property<double>("ModelPercentMin")
                         .HasColumnType("double precision");
+
+                    b.Property<double>("PriceMax")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(10000.0);
 
                     b.Property<double>("PriceMin")
                         .HasColumnType("double precision");
 
                     b.Property<int>("ProfitPercent")
-                        .HasColumnType("integer");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10);
 
                     b.Property<double>("ReferralBalance")
                         .HasColumnType("double precision");
 
                     b.Property<double>("ReferralPercent")
-                        .HasColumnType("double precision");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(25.0);
 
                     b.Property<long?>("ReferrerId")
                         .HasColumnType("bigint");
 
                     b.Property<long>("Status")
-                        .HasColumnType("bigint");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
 
                     b.HasKey("Id");
 
