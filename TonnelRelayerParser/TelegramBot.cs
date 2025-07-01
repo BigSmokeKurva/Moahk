@@ -582,10 +582,10 @@ public class TelegramBot : IDisposable
 
     private async Task PriceRangeSetValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
     {
-        var parts = msg.Text?.Replace('.', ',').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var parts = msg.Text?.Replace(',', '.').Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts is not { Length: 2 } ||
-            !double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var min) ||
-            !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var max) || min < 0 ||
+            !double.TryParse(parts[0], CultureInfo.InvariantCulture, out var min) ||
+            !double.TryParse(parts[1], CultureInfo.InvariantCulture, out var max) || min < 0 ||
             max < 0 || min >= max)
         {
             await _botClient.SendMessage(msg.From!.Id, """

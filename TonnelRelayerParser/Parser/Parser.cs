@@ -122,7 +122,7 @@ public class Parser : IAsyncDisposable
                 }
 
                 var tonnelGiftWithMinPrice = tonnelGiftSearch.MinBy(x => x.Price);
-                var tonnelPrice = tonnelGiftWithMinPrice!.Price + tonnelGiftWithMinPrice.Price * 0.04;
+                var tonnelPrice = CalculateTonnelPriceWithCommission((double)tonnelGiftWithMinPrice!.Price!);
                 // portals
                 var portalsGiftSearch = await PortalsSearchGift(giftInfo.Backdrop,
                     giftInfo.Model!, giftInfo.Name!);
@@ -142,7 +142,7 @@ public class Parser : IAsyncDisposable
                         + '-' + tonnelGiftWithMinPrice.GiftNum;
                     gift = new Gift
                     {
-                        Price = (double)tonnelPrice!,
+                        Price = tonnelPrice!,
                         Activity = activity,
                         TelegramGiftId = telegramGiftId,
                         SiteUrl = $"https://market.tonnel.network/?giftDrawerId={tonnelGiftWithMinPrice.GiftId}",
@@ -162,7 +162,7 @@ public class Parser : IAsyncDisposable
                         + '-' + portalsGiftWithMinPrice!.ExternalCollectionNumber;
                     gift = new Gift
                     {
-                        Price = (double)portalsPrice!,
+                        Price = (double)portalsPrice,
                         Activity = activity,
                         TelegramGiftId = telegramGiftId,
                         BotUrl = $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}",
@@ -207,7 +207,7 @@ public class Parser : IAsyncDisposable
                 }
 
                 tonnelGiftWithMinPrice = tonnelGiftSearch.MinBy(x => x.Price);
-                tonnelPrice = tonnelGiftWithMinPrice!.Price + tonnelGiftWithMinPrice.Price * 0.04;
+                tonnelPrice = CalculateTonnelPriceWithCommission((double)tonnelGiftWithMinPrice!.Price!);
                 // portals
                 portalsGiftSearch = await PortalsSearchGift(null,
                     giftInfo.Model!, giftInfo.Name!);
@@ -226,7 +226,7 @@ public class Parser : IAsyncDisposable
                         + '-' + tonnelGiftWithMinPrice.GiftNum;
                     gift = new Gift
                     {
-                        Price = (double)tonnelPrice!,
+                        Price = tonnelPrice!,
                         Activity = activity,
                         TelegramGiftId = telegramGiftId,
                         SiteUrl = $"https://market.tonnel.network/?giftDrawerId={tonnelGiftWithMinPrice.GiftId}",
@@ -246,7 +246,7 @@ public class Parser : IAsyncDisposable
                         + '-' + portalsGiftWithMinPrice!.ExternalCollectionNumber;
                     gift = new Gift
                     {
-                        Price = (double)portalsPrice!,
+                        Price = (double)portalsPrice,
                         Activity = activity,
                         TelegramGiftId = telegramGiftId,
                         BotUrl = $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}",
@@ -456,7 +456,7 @@ public class Parser : IAsyncDisposable
             gift.IsSold = telegramGiftInfo.IsSold;
         }
 
-        await _telegramBot.SendSignal(gift, percentDiff, secondFloorPrice!, percentile25, percentile75,
+        await _telegramBot.SendSignal(gift, percentDiff, secondFloorPrice, percentile25, percentile75,
             lastTwoWeeksMaxPrice, criteria);
     }
 
