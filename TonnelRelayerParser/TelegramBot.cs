@@ -38,7 +38,7 @@ public class TelegramBot : IDisposable
         _me = _botClient.GetMe().Result;
         _botClient.OnMessage += OnMessage;
         _botClient.OnUpdate += OnUpdate;
-        _botClient.OnError += (sender, args) =>
+        _botClient.OnError += (sender, _) =>
         {
             Logger.Error(sender, "An error occurred in the Telegram bot.");
             return Task.CompletedTask;
@@ -114,7 +114,7 @@ public class TelegramBot : IDisposable
         switch (command)
         {
             case "/start":
-                await StartCommand(msg, dbContext, user, isNew = isNew);
+                await StartCommand(msg, dbContext, user, isNew);
                 break;
             case "/find" when Admins.Contains(msg.From!.Id):
                 await AdminFindCommand(msg, args, dbContext, user);
@@ -264,7 +264,7 @@ public class TelegramBot : IDisposable
     {
         await using var dbContext = new ApplicationDbContext();
         var user = await dbContext.AddUserAsync(callbackQuery.From?.Id ?? throw new Exception("UserId is null"));
-        if (callbackQuery?.Message?.Chat.Type != ChatType.Private)
+        if (callbackQuery.Message?.Chat.Type != ChatType.Private)
             return;
         switch (callbackQuery.Data)
         {

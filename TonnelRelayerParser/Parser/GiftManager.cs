@@ -4,7 +4,7 @@ using NLog;
 
 namespace Moahk.Parser;
 
-public class GiftManager
+public static class GiftManager
 {
     private static readonly HttpClient Client = new();
     private static readonly HtmlParser Parser = new();
@@ -33,12 +33,12 @@ public class GiftManager
 
         return new GiftInfo
         {
-            Model = (model, double.Parse(modelPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
+            Model = (model, double.Parse(modelPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
             Backdrop = (backdrop,
-                double.Parse(backdropPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
-            Symbol = (symbol, double.Parse(symbolPercentage[..^1], NumberStyles.Any, CultureInfo.InvariantCulture)),
-            // Quantity = (int.Parse(quantityParts[0], NumberStyles.AllowThousands),
-            //     int.Parse(quantityParts[1], NumberStyles.AllowThousands)),
+                double.Parse(backdropPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
+            Symbol = (symbol, double.Parse(symbolPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
+            Quantity = (int.Parse(new string(quantityParts[0].Where(char.IsDigit).ToArray())),
+                int.Parse(new string(quantityParts[1].Where(char.IsDigit).ToArray()))),
             IsSold = isSoldElement is not null,
             Id = giftId
         };
