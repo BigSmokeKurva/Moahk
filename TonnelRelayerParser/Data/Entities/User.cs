@@ -5,11 +5,14 @@ namespace Moahk.Data.Entities;
 public class User
 {
     public long Id { get; init; }
-    public DateTimeOffset License { get; set; } = DateTimeOffset.MinValue;
-    public double PriceMin { get; set; } = 0;
+    public DateTimeOffset? License { get; set; } = null;
+    public double PriceMin { get; set; }
     public double PriceMax { get; set; } = 10000;
     public int ProfitPercent { get; set; } = 10;
     public Criteria Criteria { get; set; } = Criteria.SecondFloor;
     public Status Status { get; set; } = Status.None;
-    public bool IsStarted { get; set; } = false;
+    public bool IsStarted { get; set; }
+    public double ReferralBalance { get; set; }
+    public double ReferralPercent { get; set; } = 25;
+    public long? ReferrerId { get; set; } = null;
 }

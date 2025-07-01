@@ -96,7 +96,7 @@ public class TelegramBot : IDisposable
             case "❓ FAQ":
                 await FaqTextCommand(msg, dbContext, user);
                 break;
-            case "📊 Мой статус":
+            case "📊 Мой профиль":
                 await StatusTextCommand(msg, dbContext, user);
                 break;
             case not null when user.Status == Status.WritingPriceRange:
@@ -114,7 +114,7 @@ public class TelegramBot : IDisposable
         switch (command)
         {
             case "/start":
-                await StartCommand(msg, dbContext, user, isNew);
+                await StartCommand(msg, args, dbContext, user, isNew);
                 break;
             case "/find" when Admins.Contains(msg.From!.Id):
                 await AdminFindCommand(msg, args, dbContext, user);
@@ -122,15 +122,22 @@ public class TelegramBot : IDisposable
             case "/set_time" when Admins.Contains(msg.From!.Id):
                 await AdminSetTimeCommand(msg, args, dbContext, user);
                 break;
+            case "/set_referral_balance" when Admins.Contains(msg.From!.Id):
+                await AdminSetReferralBalanceCommand(msg, args, dbContext, user);
+                break;
+            case "/set_referral_percent" when Admins.Contains(msg.From!.Id):
+                await AdminSetReferralPercentCommand(msg, args, dbContext, user);
+                break;
         }
     }
 
-    private async Task StartCommand(Message msg, ApplicationDbContext dbContext, Data.Entities.User user,
+    private async Task StartCommand(Message msg, string args, ApplicationDbContext dbContext, Data.Entities.User user,
         bool isNew = false)
     {
+        if (isNew && long.TryParse(args, out var referrerId)) user.ReferrerId = referrerId;
         user.Status = Status.None;
         await dbContext.SaveChangesAsync();
-        var (keyboard, msgText) = GetMainMenuMessage(user, isNew || user.License < DateTimeOffset.UtcNow);
+        var (keyboard, msgText) = GetMainMenuMessage(user, isNew || user.License is null || user.License < DateTimeOffset.UtcNow);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
@@ -148,7 +155,7 @@ public class TelegramBot : IDisposable
                 ],
                 [
                     "❓ FAQ",
-                    "📊 Мой статус"
+                    "📊 Мой профиль"
                 ]
             ];
             msgText = """
@@ -180,13 +187,13 @@ public class TelegramBot : IDisposable
                 ],
                 [
                     "❓ FAQ",
-                    "📊 Мой статус"
+                    "📊 Мой профиль"
                 ]
             ];
             msgText = $"""
                        🎯 Главное меню
 
-                       Статус подписки: {(user.License >= DateTimeOffset.UtcNow ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Подписка неактивна")}
+                       Статус подписки: {(user.License is not null && user.License >= DateTimeOffset.UtcNow ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Подписка неактивна")}
                        Поиск: {(user.IsStarted ? "▶️ Поиск запущен!" : "⏹️ Остановлен")}
                        """;
         }
@@ -214,12 +221,13 @@ public class TelegramBot : IDisposable
         await _botClient.SendMessage(msg.From!.Id, $"""
                                                     Пользователь найден:
                                                     ID: {foundUser.Id}
-                                                    Лицензия: {foundUser.License:yyyy-MM-dd HH:mm} UTC
-                                                    Диапазон цен: {foundUser.PriceMin:0.00} - {foundUser.PriceMax:0.00}
+                                                    Лицензия: {(foundUser.License is not null ? $"{foundUser.License:yyyy-MM-dd HH:mm} UTC" : "Не покупал лицензию")}
+                                                    Диапазон цен: {foundUser.PriceMin:F2} - {foundUser.PriceMax:F2}
                                                     Процент прибыли: {foundUser.ProfitPercent}%
                                                     Критерии: {CriteriaToString(foundUser.Criteria)}
-                                                    Статус: {foundUser.Status}
                                                     Запущено: {foundUser.IsStarted}
+                                                    Баланс рефералов: {foundUser.ReferralBalance:F2} USDT
+                                                    Количество рефералов: {await dbContext.Users.CountAsync(x => x.ReferrerId == foundUser.Id)}
                                                     """);
     }
 
@@ -246,9 +254,51 @@ public class TelegramBot : IDisposable
 
         foundUser.License = newTime;
         await dbContext.SaveChangesAsync();
-        await _botClient.SendMessage(msg.From!.Id, $"""
-                                                    Лицензия пользователя {foundUser.Id} успешно изменена на {newTime:yyyy-MM-dd HH:mm} UTC.
-                                                    """);
+        await _botClient.SendMessage(msg.From!.Id, $"Лицензия пользователя {foundUser.Id} успешно изменена на {newTime:yyyy-MM-dd HH:mm} UTC.");
+    }
+
+    private async Task AdminSetReferralBalanceCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !long.TryParse(parts[0], out var userId) ||
+            !double.TryParse(parts[1].Replace(',', '.'), CultureInfo.InvariantCulture, out var newBalance))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                "Неверный формат. Используйте: /set_referral_balance <user_id> <new_balance>");
+            return;
+        }
+        var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (foundUser is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
+            return;
+        }
+        foundUser.ReferralBalance = newBalance;
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(msg.From!.Id, $"Баланс рефералов пользователя {foundUser.Id} успешно изменен на {newBalance} USDT.");
+    }
+
+    private async Task AdminSetReferralPercentCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !long.TryParse(parts[0], out var userId) ||
+            !double.TryParse(parts[1].Replace(',', '.'), CultureInfo.InvariantCulture, out var newPercent))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                "Неверный формат. Используйте: /set_referral_percent <user_id> <new_percent>");
+            return;
+        }
+        var foundUser = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (foundUser is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пользователь не найден.");
+            return;
+        }
+        foundUser.ReferralPercent = newPercent;
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(msg.From!.Id, $"Процент рефералов пользователя {foundUser.Id} успешно изменен на {newPercent}%.");
     }
 
     private async Task OnUpdate(Update update)
@@ -367,10 +417,8 @@ public class TelegramBot : IDisposable
                 InlineKeyboardButton.WithCallbackData("Crystalpay", $"renew_license_crystalpay_{days}")
             ]
         ]);
-        // await _botClient.SendMessage(callbackQuery.From.Id,
-        //     $"Вы выбрали продление лицензии на {days} день(я). Выберите способ оплаты:", replyMarkup: keyboard);
         await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
-            $"Вы выбрали продление лицензии на {days} день(я). Выберите способ оплаты:", replyMarkup: keyboard);
+            $"Вы выбрали продление лицензии на {days} {DaysFormat(days)}. Выберите способ оплаты:", replyMarkup: keyboard);
     }
 
     private async Task RenewLicenseCrystalpayCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -385,7 +433,7 @@ public class TelegramBot : IDisposable
         var price = days switch
         {
             // 1 => 2,
-            30 => 25,
+            30 => 40,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
         using var r = await _httpClient.PostAsJsonAsync("https://api.crystalpay.io/v3/invoice/create/", new
@@ -410,7 +458,8 @@ public class TelegramBot : IDisposable
             User = user,
             Id = invoice.Id ?? throw new InvalidOperationException(),
             Url = invoice.Url ?? throw new InvalidOperationException(),
-            Days = days
+            Days = days,
+            Amount = price
         });
         await dbContext.SaveChangesAsync();
         var keyboard = new InlineKeyboardMarkup([
@@ -465,15 +514,36 @@ public class TelegramBot : IDisposable
             return;
         }
 
-        if (invoiceInfo.State != "payed")
+         if (invoiceInfo.State != "payed")
+         {
+             await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не оплачен.");
+             return;
+         }
+        
+        if (user.ReferrerId is not null && user.License is null)
         {
-            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Счет не оплачен.");
-            return;
+            var referrer = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == user.ReferrerId);
+            if (referrer is not null)
+            {
+                var referralProfit = crystalpayInvoice.Amount * referrer.ReferralPercent / 100;
+                referrer.ReferralBalance += referralProfit;
+                try
+                {
+                    await _botClient.SendMessage(user.ReferrerId.Value,
+                        $"""
+                         🎉 Ваш реферал оплатил подписку на {crystalpayInvoice.Days} {DaysFormat(crystalpayInvoice.Days)}.
+                         Вы получили {referralProfit} USDT на свой баланс.
+                         """);
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
         }
-
-        user.License = user.License < DateTimeOffset.Now
+        user.License = user.License is null || user.License < DateTimeOffset.Now
             ? DateTimeOffset.UtcNow.AddDays(crystalpayInvoice.Days)
-            : user.License.AddDays(crystalpayInvoice.Days);
+            : user.License!.Value.AddDays(crystalpayInvoice.Days);
         crystalpayInvoice.IsPaid = true;
         await dbContext.SaveChangesAsync();
         var (keyboard, _) = GetMainMenuMessage(user, false);
@@ -484,12 +554,22 @@ public class TelegramBot : IDisposable
             Приватка -  https://t.me/+CcNTT5q3T7U1ZTIy
             """, replyMarkup: InlineKeyboardMarkup.Empty());
         await _botClient.SendMessage(callbackQuery.From.Id,
-            $"Лицензия успешно продлена на {crystalpayInvoice.Days} день(я).", replyMarkup: keyboard);
+            $"Лицензия успешно продлена на {crystalpayInvoice.Days} {DaysFormat(crystalpayInvoice.Days)}", replyMarkup: keyboard);
+    }
+    
+    private string DaysFormat(int days)
+    {
+        return days switch
+        {
+            1 => "день",
+            2 or 3 or 4 => "дня",
+            _ => "дней"
+        };
     }
 
     private async Task<bool> CheckLicense(Data.Entities.User user)
     {
-        if (user.License >= DateTimeOffset.UtcNow) return false;
+        if (user.License is not null && user.License >= DateTimeOffset.UtcNow) return false;
         await _botClient.SendMessage(user.Id,
             "У вас нет активной лицензии.");
         return true;
@@ -758,7 +838,7 @@ public class TelegramBot : IDisposable
                        📈 Выгода: от {user.ProfitPercent}%
                        📊 Критерий: {CriteriaToString(user.Criteria)}
                        """;
-        var (keyboard, _) = GetMainMenuMessage(user, user.License < DateTimeOffset.UtcNow);
+        var (keyboard, _) = GetMainMenuMessage(user, user.License is null || user.License < DateTimeOffset.UtcNow);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
@@ -775,7 +855,7 @@ public class TelegramBot : IDisposable
                       Бот прекратил сканирование предложений.
                       Для возобновления нажмите "Запустить".
                       """;
-        var (keyboard, _) = GetMainMenuMessage(user, user.License < DateTimeOffset.UtcNow);
+        var (keyboard, _) = GetMainMenuMessage(user, user.License is null || user.License < DateTimeOffset.UtcNow);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
     }
 
@@ -825,11 +905,11 @@ public class TelegramBot : IDisposable
 
                        Контакты для связи - https://t.me/retrowaiver
 
-                       {(user.License > DateTimeOffset.UtcNow ? """
-                                                                Гайд - https://teletype.in/@retrowaiver/ConvyrGiftFlipper
+                       {(user.License is not null && user.License > DateTimeOffset.UtcNow ? """
+                           Гайд - https://teletype.in/@retrowaiver/ConvyrGiftFlipper
 
-                                                                Приватка -  https://t.me/+CcNTT5q3T7U1ZTIy
-                                                                """ : string.Empty)}
+                           Приватка -  https://t.me/+CcNTT5q3T7U1ZTIy
+                           """ : string.Empty)}
                        """;
         await _botClient.SendMessage(msg.From!.Id, msgText);
     }
@@ -837,19 +917,29 @@ public class TelegramBot : IDisposable
     private async Task StatusTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        var hoursDiff = (user.License - DateTimeOffset.UtcNow).TotalHours;
+        var hoursDiff = user.License is not null ?(user.License - DateTimeOffset.UtcNow).Value.TotalHours : -1;
         var msgText = $"""
-                       💎 Подписка: {(hoursDiff > 0 ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Неактивна")}
-                       🔍 Поиск: {(user.IsStarted ? "▶️ Запущен" : "⏹️ Остановлен")}
-                       {(hoursDiff <= 24 ? "⚠️ Подписка скоро истечёт! Продлите её, чтобы не пропустить выгодные предложения." : string.Empty)}
+                       💎 *Подписка:* {(hoursDiff > 0 ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Неактивна")}
+                       🔍 *Поиск:* {(user.IsStarted ? "▶️ Запущен" : "⏹️ Остановлен")}
+                       
+                       ---💰РЕФЕРАЛЬНАЯ ПРОГРАММА--- 
+                       📊 *Процент:* {user.ReferralPercent:F2}%
+                       👥 *Приглашено:* {await dbContext.Users.CountAsync(x => x.ReferrerId == user.Id)}
+                       💵 *Заработано:* {user.ReferralBalance:F2} USDT
+                       
+                       {(hoursDiff is <= 24 and > 0 ? "⚠️ Подписка скоро истечёт! Продлите её, чтобы не пропустить выгодные предложения." : string.Empty)}
                        """;
         var buttons = new List<List<InlineKeyboardButton>>([
             [
                 InlineKeyboardButton.WithCallbackData("💳 Продлить подписку", "renew_license")
+            ],
+            [
+                InlineKeyboardButton.WithCopyText("🔗 Реферальная ссылка",
+                    $"https://t.me/{_me.Username}?start={user.Id}")
             ]
         ]);
         var keyboard = new InlineKeyboardMarkup(buttons);
-        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard);
+        await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard, parseMode:ParseMode.Markdown);
     }
 
     public async Task SendSignal(Gift gift, double percentDiff, double secondFloorPrice, double? percentile25,
