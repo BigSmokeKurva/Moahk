@@ -24,6 +24,7 @@ public class Gift
 
     public required Bot AlternativeBot { get; init; }
     public double? AlternativePrice { get; init; }
+    public string? AlternativeBotUrl { get; init; }
 }
 
 public enum Bot
@@ -150,6 +151,7 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Tonnel,
                         AlternativeBot = Bot.Portals,
                         AlternativePrice = portalsPrice,
+                        AlternativeBotUrl = portalsGiftWithMinPrice is not null ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}" : null,
                         Name = tonnelGiftWithMinPrice.Name!,
                         Model = tonnelGiftWithMinPrice.Model!,
                         Backdrop = tonnelGiftWithMinPrice.Backdrop!
@@ -169,6 +171,7 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Portals,
                         AlternativeBot = Bot.Tonnel,
                         AlternativePrice = tonnelPrice,
+                        AlternativeBotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
                         Name = portalsGiftWithMinPrice.Name!,
                         Model = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "model").Value!,
                         Backdrop = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "backdrop").Value!
@@ -234,6 +237,7 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Tonnel,
                         AlternativeBot = Bot.Portals,
                         AlternativePrice = portalsPrice,
+                        AlternativeBotUrl = portalsGiftWithMinPrice is not null ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}" : null,
                         Name = tonnelGiftWithMinPrice.Name!,
                         Model = tonnelGiftWithMinPrice.Model!,
                         Backdrop = tonnelGiftWithMinPrice.Backdrop!
@@ -253,6 +257,7 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Portals,
                         AlternativeBot = Bot.Tonnel,
                         AlternativePrice = tonnelPrice,
+                        AlternativeBotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
                         Name = portalsGiftWithMinPrice.Name!,
                         Model = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "model").Value!,
                         Backdrop = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "backdrop").Value!

@@ -1072,7 +1072,7 @@ public class TelegramBot : IDisposable
 
                    --- АНАЛИЗ РЫНКА (В продаже) ---
                    💰 *Второй флор:* {secondFloorPrice:F2} TON
-                   {(gift.AlternativePrice is not null ? $"💰 *Самый дешевый на {gift.AlternativeBot.ToString().ToUpper()}:* {gift.AlternativePrice:F2} TON" : string.Empty)}
+                   {(gift.AlternativePrice is not null ? $"💰 *Самый дешевый на* [{gift.AlternativeBot.ToString().ToUpper()}]({gift.AlternativeBotUrl}): {gift.AlternativePrice:F2} TON" : string.Empty)}
 
                    --- ПРОГНОЗ ПРОДАЖИ (История сделок) ---
                    📉 *Нижний уровень цен (25%):* {(percentile25 is not null ? $"{percentile25:F2} TON" : "Недостаточно данных")}
