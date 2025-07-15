@@ -17,4 +17,5 @@ public class User
     public long? ReferrerId { get; set; }
     public double ModelPercentMin { get; set; }
     public double ModelPercentMax { get; set; } = 100;
+    public virtual PromoCode? PromoCode { get; set; }
 }

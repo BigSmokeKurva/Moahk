@@ -108,6 +108,9 @@ public class TelegramBot : IDisposable
             case not null when user.Status == Status.WritingModelPercent:
                 await ModelPercentSetValue(msg, dbContext, user);
                 break;
+            case not null when user.Status == Status.WritingPromoCode:
+                await PromoCodeSetValue(msg, dbContext, user);
+                break;
         }
     }
 
@@ -130,6 +133,15 @@ public class TelegramBot : IDisposable
                 break;
             case "/set_referral_percent" when Admins.Contains(msg.From!.Id):
                 await AdminSetReferralPercentCommand(msg, args, dbContext, user);
+                break;
+            case "/set_promo" when Admins.Contains(msg.From!.Id):
+                await AdminSetPromoCodeCommand(msg, args, dbContext, user);
+                break;
+            case "/find_promo" when Admins.Contains(msg.From!.Id):
+                await FindPromoCodeCommand(msg, args, dbContext, user);
+                break;
+            case "/delete_promo" when Admins.Contains(msg.From!.Id):
+                await DeletePromoCodeCommand(msg, args, dbContext, user);
                 break;
         }
     }
@@ -312,6 +324,116 @@ public class TelegramBot : IDisposable
             $"Процент рефералов пользователя {foundUser.Id} успешно изменен на {newPercent}%.");
     }
 
+    private async Task AdminSetPromoCodeCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        /*
+         * /setpromo <КОД> <%скидки> <макс_использований> <дата_окончания>
+         * макс_использований может быть -1 или пустым для неограниченного количества т.е null
+         * дата_окончания может быть пустой для неограниченного срока действия
+         */
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || parts.Length > 4 ||
+            !double.TryParse(parts[1].Replace(',', '.'), CultureInfo.InvariantCulture, out var percent) ||
+            percent < 0 || percent > 100)
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                "Неверный формат. Используйте: /setpromo <КОД> <%скидки> [<макс_использований>] [<дата_окончания>]");
+            return;
+        }
+
+        var code = parts[0];
+        var maxUses = parts.Length > 2 && int.TryParse(parts[2], out var uses) ? (int?)uses : null;
+        DateTimeOffset date = default;
+        DateTimeOffset? expirationDate = null;
+        switch (parts.Length)
+        {
+            case 4 when !DateTimeOffset.TryParse(parts[3], null,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out date):
+                await _botClient.SendMessage(msg.From!.Id,
+                    "Неверный формат даты. Используйте: /setpromo <КОД> <%скидки> [<макс_использований>] <дата_окончания>");
+                return;
+            case 4:
+                expirationDate = date;
+                break;
+        }
+
+        var existingCode = await dbContext.PromoCodes.FirstOrDefaultAsync(x => x.Code == code);
+        if (existingCode is not null)
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                $"Промокод {code} уже существует. Используйте другой код или удалите существующий.");
+            return;
+        }
+
+        var promoCode = new PromoCode
+        {
+            Code = code,
+            Percent = percent,
+            MaxUses = maxUses is not null && maxUses != -1 ? maxUses : null,
+            DateExpiration = expirationDate
+        };
+        await dbContext.PromoCodes.AddAsync(promoCode);
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(msg.From!.Id,
+            $"""
+             Промокод {code} успешно создан с {percent}% скидкой. 
+             {(promoCode.MaxUses.HasValue ? $"Максимальное количество использований: {promoCode.MaxUses.Value}. " : string.Empty)}
+             {(expirationDate.HasValue ? $"Дата окончания: {expirationDate.Value:yyyy-MM-dd HH:mm} UTC." : "Без срока действия.")}
+             """);
+    }
+
+    private async Task FindPromoCodeCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (string.IsNullOrWhiteSpace(args))
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пожалуйста, введите код промокода.");
+            return;
+        }
+
+        var promoCode = await dbContext.PromoCodes.FirstOrDefaultAsync(x => x.Code == args);
+        if (promoCode is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Промокод не найден.");
+            return;
+        }
+
+        var response = $"""
+                        Промокод найден:
+                        Код: {promoCode.Code}
+                        Скидка: {promoCode.Percent}%
+                        {(promoCode.MaxUses.HasValue ? $"Макс. использования: {promoCode.MaxUses.Value}" : "Без ограничений")}
+                        Использовано: {promoCode.UsedUsersIds.Count}
+                        {(promoCode.DateExpiration.HasValue ? $"Дата окончания: {promoCode.DateExpiration.Value:yyyy-MM-dd HH:mm} UTC" : "Без срока действия")}
+                        """;
+        await _botClient.SendMessage(msg.From!.Id, response);
+    }
+
+    private async Task DeletePromoCodeCommand(Message msg, string args, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (string.IsNullOrWhiteSpace(args))
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Пожалуйста, введите код промокода для удаления.");
+            return;
+        }
+
+        var promoCode = await dbContext.PromoCodes.FirstOrDefaultAsync(x => x.Code == args);
+        if (promoCode is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id, "Промокод не найден.");
+            return;
+        }
+
+        await dbContext.Users
+            .Where(u => u.PromoCode != null && u.PromoCode.Code == promoCode.Code)
+            .ForEachAsync(u => u.PromoCode = null);
+        dbContext.PromoCodes.Remove(promoCode);
+        await dbContext.SaveChangesAsync();
+        await _botClient.SendMessage(msg.From!.Id, $"Промокод {promoCode.Code} успешно удален.");
+    }
+
     private async Task OnUpdate(Update update)
     {
         switch (update)
@@ -359,7 +481,7 @@ public class TelegramBot : IDisposable
             case "model_percent":
                 await ModelPercentCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
-            case "renew_license_1":
+            // case "renew_license_1":
             case "renew_license_30":
                 await RenewLicenseDaysCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
@@ -369,6 +491,12 @@ public class TelegramBot : IDisposable
                 break;
             case { } data when data.StartsWith("check_crystalpay_"):
                 await CheckCrystalpayCallbackQuery(callbackQuery, dbContext, user.user);
+                break;
+            case "status_back":
+                await StatusBackCallbackQuery(callbackQuery, dbContext, user.user);
+                break;
+            case "promo_code_input":
+                await PromoCodeInputCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
         }
 
@@ -445,12 +573,13 @@ public class TelegramBot : IDisposable
             "renew_license_crystalpay_30" => 30,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
-        var price = days switch
+        double price = days switch
         {
             // 1 => 2,
             30 => 40,
             _ => throw new Exception("Неверное количество дней для продления лицензии.")
         };
+        if (user.PromoCode is not null) price -= price * user.PromoCode.Percent / 100;
         using var r = await _httpClient.PostAsJsonAsync("https://api.crystalpay.io/v3/invoice/create/", new
         {
             auth_login = _crystalpayLogin,
@@ -560,6 +689,12 @@ public class TelegramBot : IDisposable
         user.License = user.License is null || user.License < DateTimeOffset.Now
             ? DateTimeOffset.UtcNow.AddDays(crystalpayInvoice.Days)
             : user.License!.Value.AddDays(crystalpayInvoice.Days);
+        if (user.PromoCode is not null)
+        {
+            user.PromoCode.UsedUsersIds.Add(user.Id);
+            user.PromoCode = null;
+        }
+
         crystalpayInvoice.IsPaid = true;
         await dbContext.SaveChangesAsync();
         var (keyboard, _) = GetMainMenuMessage(user, false);
@@ -892,6 +1027,87 @@ public class TelegramBot : IDisposable
         await FiltersBackCallbackQuery(callbackQuery, dbContext, user);
     }
 
+    private async Task PromoCodeInputCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var keyboard = new InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к профилю", "status_back")
+            ]
+        ]);
+        user.Status = Status.WritingPromoCode;
+        await dbContext.SaveChangesAsync();
+        var msgText = $"""
+                       📢 Введите промокод
+
+                       Текущий промокод: {user.PromoCode?.Code ?? "Не установлен"}
+
+                       Введите новый промокод в формате:
+                       промокод
+                       Примеры:
+                       - MYPROMO123
+                       """;
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
+    }
+
+    private async Task PromoCodeSetValue(Message msg, ApplicationDbContext dbContext, Data.Entities.User user)
+    {
+        var promoCodeString = msg.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(promoCodeString))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                """
+                ❌ Неверный формат
+                """);
+            return;
+        }
+
+        var promoCode = await dbContext.PromoCodes
+            .FirstOrDefaultAsync(x => x.Code == promoCodeString);
+        if (promoCode is null)
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                """
+                ❌ Упс! Промокод неправильный.
+                """);
+            return;
+        }
+
+        if (promoCode.MaxUses is not null && promoCode.MaxUses <= promoCode.UsedUsersIds.Count)
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                """
+                ⚠️ Упс! Промокод исчерпан.
+                """);
+            return;
+        }
+
+        if (promoCode.DateExpiration is not null && promoCode.DateExpiration < DateTimeOffset.UtcNow)
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                """
+                ⚠️ Упс! Промокод просрочен.
+                """);
+            return;
+        }
+
+        if (promoCode.UsedUsersIds.Any(x => x == user.Id))
+        {
+            await _botClient.SendMessage(msg.From!.Id,
+                """
+                🔒 Упс! Вы уже использовали этот промокод.
+                """);
+            return;
+        }
+
+        user.Status = Status.None;
+        user.PromoCode = promoCode;
+        await dbContext.SaveChangesAsync();
+        await StatusTextCommand(msg, dbContext, user);
+    }
+
     private async Task StartTextCommand(Message msg, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
@@ -987,13 +1203,14 @@ public class TelegramBot : IDisposable
         await _botClient.SendMessage(msg.From!.Id, msgText);
     }
 
-    private async Task StatusTextCommand(Message msg, ApplicationDbContext dbContext,
+    private async Task<(InlineKeyboardMarkup keyboard, string msgText)> GetStatusMessage(ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
         var hoursDiff = user.License is not null ? (user.License - DateTimeOffset.UtcNow).Value.TotalHours : -1;
         var msgText = $"""
                        💎 *Подписка:* {(hoursDiff > 0 ? $"✅ Активна до {user.License:yyyy-MM-dd HH:mm} UTC" : "❌ Неактивна")}
                        🔍 *Поиск:* {(user.IsStarted ? "▶️ Запущен" : "⏹️ Остановлен")}
+                       {(user.PromoCode is not null ? $"🔖 *Промокод:* {EscapeMarkdown(user.PromoCode.Code)} на {user.PromoCode.Percent:F2}%{(user.PromoCode.DateExpiration is not null ? $" активен до {user.PromoCode.DateExpiration:yyyy-MM-dd HH:mm} UTC" : string.Empty)}" : string.Empty)}
 
                        ---💰РЕФЕРАЛЬНАЯ ПРОГРАММА--- 
                        📊 *Процент:* {user.ReferralPercent:F2}%
@@ -1007,12 +1224,43 @@ public class TelegramBot : IDisposable
                 InlineKeyboardButton.WithCallbackData("💳 Продлить подписку", "renew_license")
             ],
             [
+                InlineKeyboardButton.WithCallbackData("🧨 Ввести промокод", "promo_code_input")
+            ],
+            [
                 InlineKeyboardButton.WithCopyText("🔗 Реферальная ссылка",
                     $"https://t.me/{_me.Username}?start={user.Id}")
             ]
         ]);
         var keyboard = new InlineKeyboardMarkup(buttons);
+        return (keyboard, msgText);
+    }
+
+    private async Task StatusTextCommand(Message msg, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        var (keyboard, msgText) = await GetStatusMessage(dbContext, user);
         await _botClient.SendMessage(msg.From!.Id, msgText, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
+    }
+
+    private async Task StatusBackCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        user.Status = Status.None;
+        await dbContext.SaveChangesAsync();
+        var (keyboard, msgText) = await GetStatusMessage(dbContext, user);
+        // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard, parseMode: ParseMode.Markdown);
+    }
+
+    private static string EscapeMarkdown(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        var charsToEscape = new[]
+            { '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!' };
+        return charsToEscape.Aggregate(text, (current, c) => current.Replace(c.ToString(), "\\" + c));
     }
 
     public async Task SendSignal(Gift gift, double percentDiff, double secondFloorPrice, double? percentile25,
@@ -1027,34 +1275,6 @@ public class TelegramBot : IDisposable
                         x.ModelPercentMin <= gift.GiftInfo!.Value.Model.Item2 &&
                         x.ModelPercentMax >= gift.GiftInfo.Value.Model.Item2)
             .ToArrayAsync();
-//         var msg = $"""
-//                    [🎁]({tgUrl})  *{name} | {model} | {backdrop}* 🎨
-//
-//                    🔀{botName.ToUpper()}
-//
-//                    ━━━━━━━━━━━━━━━━━━━ 
-//                    💲 *Цена*: {price:F2} TON
-//                    💹 *Перспектива*: +{percentDiff:F2}%
-//                    {(isSold ? "❌ *Состояние*: Грязный" : "✅ *Состояние*: Чистый")}  
-//                    🔥 *Активность*: {activity switch
-//                    {
-//                        Activity.Low => "Низкая",
-//                        Activity.Medium => "Средняя",
-//                        _ => "Высокая"
-//                    }}
-//                    📊 Цена последней сделки: {lastActivityPrice:F2} TON
-//                    ━━━━━━━━━━━━━━━━━━━ 
-//                    {(alternativePrice is not null ? $"""
-//                                                      🔀{(botName switch {
-//                                                          "portals" => "tonnel",
-//                                                          "tonnel" => "portals",
-//                                                          _ => throw new ArgumentOutOfRangeException(nameof(botName), botName, null) }).ToUpper()}
-//
-//                                                      ━━━━━━━━━━━━━━━━━━━ 
-//                                                      💲 *Цена*: {alternativePrice:F2} TON
-//                                                      ━━━━━━━━━━━━━━━━━━━ 
-//                                                      """ : string.Empty)}
-//                    """;
         var telegramUrl = $"https://t.me/nft/{gift.TelegramGiftId}";
         var bot = gift.Bot.ToString().ToUpper();
         var msg = $"""

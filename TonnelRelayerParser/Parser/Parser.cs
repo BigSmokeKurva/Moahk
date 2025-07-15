@@ -151,7 +151,9 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Tonnel,
                         AlternativeBot = Bot.Portals,
                         AlternativePrice = portalsPrice,
-                        AlternativeBotUrl = portalsGiftWithMinPrice is not null ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}" : null,
+                        AlternativeBotUrl = portalsGiftWithMinPrice is not null
+                            ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}"
+                            : null,
                         Name = tonnelGiftWithMinPrice.Name!,
                         Model = tonnelGiftWithMinPrice.Model!,
                         Backdrop = tonnelGiftWithMinPrice.Backdrop!
@@ -171,7 +173,8 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Portals,
                         AlternativeBot = Bot.Tonnel,
                         AlternativePrice = tonnelPrice,
-                        AlternativeBotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
+                        AlternativeBotUrl =
+                            $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
                         Name = portalsGiftWithMinPrice.Name!,
                         Model = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "model").Value!,
                         Backdrop = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "backdrop").Value!
@@ -237,7 +240,9 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Tonnel,
                         AlternativeBot = Bot.Portals,
                         AlternativePrice = portalsPrice,
-                        AlternativeBotUrl = portalsGiftWithMinPrice is not null ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}" : null,
+                        AlternativeBotUrl = portalsGiftWithMinPrice is not null
+                            ? $"https://t.me/portals/market?startapp=gift_{portalsGiftWithMinPrice.Id}"
+                            : null,
                         Name = tonnelGiftWithMinPrice.Name!,
                         Model = tonnelGiftWithMinPrice.Model!,
                         Backdrop = tonnelGiftWithMinPrice.Backdrop!
@@ -257,7 +262,8 @@ public class Parser : IAsyncDisposable
                         Bot = Bot.Portals,
                         AlternativeBot = Bot.Tonnel,
                         AlternativePrice = tonnelPrice,
-                        AlternativeBotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
+                        AlternativeBotUrl =
+                            $"https://t.me/tonnel_network_bot/gift?startapp={tonnelGiftWithMinPrice.GiftId}",
                         Name = portalsGiftWithMinPrice.Name!,
                         Model = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "model").Value!,
                         Backdrop = portalsGiftWithMinPrice.Attributes!.First(x => x.Type == "backdrop").Value!
@@ -352,7 +358,7 @@ public class Parser : IAsyncDisposable
 
     private double CalculateTonnelPriceWithCommission(double price)
     {
-        return price + price * 0.04;
+        return price + price * 0.06;
     }
 
     private async Task MathSecondFloor(
@@ -464,117 +470,6 @@ public class Parser : IAsyncDisposable
         await _telegramBot.SendSignal(gift, percentDiff, secondFloorPrice, percentile25, percentile75,
             lastTwoWeeksMaxPrice, criteria);
     }
-
-//     private async Task<bool> ProcessGift(TonnelRelayerHistoryGiftInfo[] historyData, string cacheKey,
-//         (GiftInfo, TonnelRelayerGiftInfo) giftInfo, PortalsSearch.Result? portalsGift)
-//     {
-//         var lastTwoWeeksItems = historyData
-//             .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-14) &&
-//                         x.GiftId > 0)
-//             .ToArray();
-//
-//         if (lastTwoWeeksItems.Length == 0)
-//         {
-//             _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
-//             return true;
-//         }
-//
-//         var activity = lastTwoWeeksItems.Length switch
-//         {
-//             < 5 => Activity.Low,
-//             < 10 => Activity.Medium,
-//             _ => Activity.High
-//         };
-//
-//         var tonnelCurrentPrice = giftInfo.Item2.Price + giftInfo.Item2.Price * 0.1;
-//         var portalsCurrentPrice = portalsGift?.Price != null
-//             ? double.Parse(portalsGift.Price, NumberStyles.Any)
-//             : double.MaxValue;
-//         (string Name, string Model, string Backdrop, double Price, Activity Activity, string TgUrl, string botUrl,
-//             string? siteUrl) gift = portalsCurrentPrice > tonnelCurrentPrice
-//                 ? (giftInfo.Item2.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!, (double)tonnelCurrentPrice,
-//                     activity,
-//                     $"https://t.me/nft/{giftInfo.Item1.Id}",
-//                     $"https://t.me/tonnel_network_bot/gift?startapp={giftInfo.Item2.GiftId}",
-//                     $"https://market.tonnel.network/?giftDrawerId={giftInfo.Item2.GiftId}")
-//                 : (portalsGift!.Name!, giftInfo.Item2.Model!, giftInfo.Item2.Backdrop!,
-//                     portalsCurrentPrice, activity,
-//                     $"https://t.me/nft/{giftInfo.Item1.Id}",
-//                     $"https://t.me/portals/gift?startapp={giftInfo.Item2.GiftId}",
-//                     null);
-//
-//         #region Peak
-//
-//         // максимальная цена за 14 дней
-//         var maxPrice = lastTwoWeeksItems.OrderByDescending(x => x.Price).First().Price;
-//         // tonnel
-//         var percentDiffTonnel = (maxPrice - tonnelCurrentPrice) / maxPrice * 100.0;
-//
-//
-//         if (percentDiffTonnel > 10)
-//         {
-//             _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(60));
-//             Logger.Info($"""
-//
-//                          Подарок: {giftInfo.Item2.Name}
-//                          Модель: {giftInfo.Item2.Model}
-//                          Фон: {giftInfo.Item2.Backdrop}
-//                          Цена сейчас: {tonnelCurrentPrice:F2}
-//                          Сред. Макс. цена за 14 дней: {maxPrice:F2}
-//                          Разница: {percentDiffTonnel:F2}%
-//                          Активность: {activity switch
-//                          {
-//                              Activity.Low => "Низкая",
-//                              Activity.Medium => "Средняя",
-//                              _ => "Высокая"
-//                          }}
-//                          {(giftInfo.Item1.IsSold ? "Грязный" : null)}
-//                          """);
-//             // TODO
-//             // await _telegramBot.SendMessageAsync(giftInfo, (double)currentPrice!, (double)middlePrice!,
-//             //     (double)percentDiffTonnel, activity);
-//         }
-//         else
-//         {
-//             _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
-//         }
-//
-//         // portals
-//         if (portalsGift?.Price == null) return false;
-//         var portalsPrice = double.Parse(portalsGift.Price, NumberStyles.Any);
-//         var percentDiffPortals = (maxPrice - portalsPrice) / maxPrice * 100.0;
-//         if (percentDiffPortals > 10)
-//         {
-//             _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(60));
-//             var msg = $"""
-//                        Подарок: {portalsGift.Name}
-//                        Модель: {giftInfo.Item2.Model}
-//                        Фон: {giftInfo.Item2.Backdrop}
-//                        PORTAL: {portalsGift.Price} ({percentDiffPortals:F2}%)
-//                        Сред. макс. (14 дн): {maxPrice:F2}
-//                        Активность: {activity switch
-//                        {
-//                            Activity.Low => "Низкая",
-//                            Activity.Medium => "Средняя",
-//                            _ => "Высокая"
-//                        }}
-//                        Состояние: {(giftInfo.Item1.IsSold ? "Грязный" : "Чистый")}
-//                        """;
-//             Logger.Info(msg);
-//             // TODO
-//             // await _telegramBot.SendMessage2Async(giftInfo,
-//             //     portalsPrice, (double)middlePrice!,
-//             //     (double)percentDiffPortals, activity, portalsGift);
-//         }
-//         else if (!_cache.Contains(cacheKey))
-//         {
-//             _cache.Set(cacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
-//         }
-//
-//         #endregion
-//
-//         return false;
-//     }
 
     private async Task<PortalsSearch?> PortalsSearchGift(string? backdrop, string model, string collection)
     {

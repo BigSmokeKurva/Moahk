@@ -8,5 +8,5 @@ public class CrystalpayInvoice
     public bool IsPaid { get; set; }
     public bool IsError { get; set; }
     public double Amount { get; set; }
-    public User User { get; set; }
+    public virtual User User { get; set; }
 }
