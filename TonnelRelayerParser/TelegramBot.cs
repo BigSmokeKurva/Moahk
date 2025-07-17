@@ -1350,6 +1350,7 @@ public class TelegramBot : IDisposable
                        🔄 *TONNEL → PORTALS*
 
                        💹 *Перспектива:* +{gift.PercentDiff:F2}%
+                       💹 *Перспектива с комиссией:* {(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission:F2}" : $"{gift.PercentDiffWithCommission:F2}")}%
 
                        --- TONNEL --- 
                        {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
@@ -1429,6 +1430,7 @@ public class TelegramBot : IDisposable
                        🔄 *PORTALS → TONNEL*
 
                        💹 *Перспектива:* +{gift.PercentDiff:F2}%
+                       💹 *Перспектива с комиссией:* {(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission:F2}" : $"{gift.PercentDiffWithCommission:F2}")}%
 
                        --- PORTALS --- 
                        {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
@@ -1438,7 +1440,7 @@ public class TelegramBot : IDisposable
                            Activity.Medium => "Средняя",
                            _ => "Высокая"
                        }}
-                       ⏱️ *Последняя сделка:* ${(gift.PortalsGift.ActivityLastSell is not null ? $"{gift.PortalsGift.ActivityLastSell.Price:F2} TON ({gift.PortalsGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
+                       ⏱️ *Последняя сделка:* {(gift.PortalsGift.ActivityLastSell is not null ? $"{gift.PortalsGift.ActivityLastSell.Price:F2} TON ({gift.PortalsGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75:F2} TON" : "Недостаточно данных")}
                        🚀 *Максимальная цена (за 7д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
@@ -1451,7 +1453,7 @@ public class TelegramBot : IDisposable
                            Activity.Medium => "Средняя",
                            _ => "Высокая"
                        }}
-                       ⏱️ *Последняя сделка:* ${(gift.TonnelGift.ActivityLastSell is not null ? $"{gift.TonnelGift.ActivityLastSell.Price:F2} TON ({gift.TonnelGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
+                       ⏱️ *Последняя сделка:* {(gift.TonnelGift.ActivityLastSell is not null ? $"{gift.TonnelGift.ActivityLastSell.Price:F2} TON ({gift.TonnelGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75:F2} TON" : "Недостаточно данных")}
                        🚀 *Максимальная цена (за 7д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}

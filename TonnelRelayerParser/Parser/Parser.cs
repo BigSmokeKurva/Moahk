@@ -54,7 +54,7 @@ public class PortalsGift : GiftBase
 public class Gift
 {
     public SignalType? Type { get; set; }
-    public double? PercentDiff { get; set; }
+    public double PercentDiff { get; set; }
     public double? PercentDiffWithCommission { get; set; }
     public TonnelGift? TonnelGift { get; init; }
     public PortalsGift? PortalsGift { get; init; }
@@ -136,7 +136,7 @@ public class Parser : IAsyncDisposable
             giftQueueItem.ModelPercent, giftQueueItem.Backdrop, giftQueueItem.BackdropPercent, searchBackdrop);
         var threeDaysActivity = activityHistory?
             .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-3) &&
-                        x is { GiftId: > 0, Type: "INTERNAL_SALE" })
+                        x is { GiftId: > 0, Type: "INTERNAL_SALE" or "SALE" })
             .ToArray();
         var activity = GetActivityFromHistory(threeDaysActivity);
         var minPriceGift = searchGifts.MinBy(x => x.Price);
@@ -191,29 +191,16 @@ public class Parser : IAsyncDisposable
             return null;
         }
 
-        List<Action> activityHistory = [];
-        var page = 0;
-        do
-        {
-            var activityHistoryResponse = await GetPortalsActivity(giftQueueItem.Name, giftQueueItem.Model,
-                giftQueueItem.Backdrop, searchBackdrop, page);
-            if (activityHistoryResponse?.Actions is null || activityHistoryResponse.Actions.Length == 0)
-                break;
-            activityHistory.AddRange(activityHistoryResponse.Actions);
-            page++;
-        }
-        // TODO: проверить ни дохуя ли элементов
-        while (activityHistory.Count % 20 == 0 || !activityHistory.Any(x =>
-                   x.CreatedAt.HasValue && x.CreatedAt.Value <= DateTimeOffset.UtcNow.AddDays(-3) &&
-                   x.Type == "purchase"));
+        var activityHistory = await GetPortalsActivity(giftQueueItem.Name, giftQueueItem.Model,
+            giftQueueItem.Backdrop, searchBackdrop);
 
-        var threeDaysActivity = activityHistory.Where(x =>
+        var threeDaysActivity = activityHistory?.Actions?.Where(x =>
                 x.CreatedAt.HasValue && x.CreatedAt.Value >= DateTimeOffset.UtcNow.AddDays(-3) && x.Type == "purchase")
             .ToArray();
         var activity = GetActivityFromHistory(threeDaysActivity);
         var minPriceGift = searchGifts.Results[0];
         var price = double.Parse(minPriceGift.Price!, CultureInfo.InvariantCulture);
-        var telegramGiftId = string.Concat(minPriceGift?.Name?.Where(char.IsLetter) ?? string.Empty)
+        var telegramGiftId = string.Concat(minPriceGift.Name?.Where(char.IsLetter) ?? string.Empty)
                              + '-' + minPriceGift!.ExternalCollectionNumber;
         var telegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(telegramGiftId);
         SecondFloorGift? secondFloorGift = null;
@@ -237,7 +224,7 @@ public class Parser : IAsyncDisposable
             Name = minPriceGift.Name!,
             Model = minPriceGift.Attributes!.First(x => x.Type == "model").Value!,
             Backdrop = minPriceGift.Attributes!.First(x => x.Type == "backdrop").Value!,
-            ActivityHistory = threeDaysActivity.ToArray(),
+            ActivityHistory = threeDaysActivity?.ToArray(),
             Activity = activity,
             Price = price,
             TelegramGiftId = telegramGiftId,
@@ -565,9 +552,11 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices?.Select(x => x.Item2).Max();
+            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices is { Length: > 0 }
+                ? portalsActivityPrices.Select(x => x.Item2).Max()
+                : null;
             // activity last price
-            gift.PortalsGift.ActivityLastSell = portalsActivityPrices?[0] != null
+            gift.PortalsGift.ActivityLastSell = portalsActivityPrices is { Length: > 0 }
                 ? new ActivityLastSell
                 {
                     Price = portalsActivityPrices[0].Item2,
@@ -575,7 +564,7 @@ public class Parser : IAsyncDisposable
                 }
                 : null;
         }
-        else if (gift.Type == SignalType.TonnelTonnel)
+        else if (gift.Type == SignalType.PortalsPortals)
         {
             var portalsActivityPrices = gift.PortalsGift?.ActivityHistory?
                 .Select(x => (x, double.Parse(x.Amount!, CultureInfo.InvariantCulture))).ToArray();
@@ -600,9 +589,11 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices?.Select(x => x.Item2).Max();
+            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices is { Length: > 0 }
+                ? portalsActivityPrices.Select(x => x.Item2).Max()
+                : null;
             // activity last price
-            gift.PortalsGift.ActivityLastSell = portalsActivityPrices?[0] != null
+            gift.PortalsGift.ActivityLastSell = portalsActivityPrices is { Length: > 0 }
                 ? new ActivityLastSell
                 {
                     Price = portalsActivityPrices[0].Item2,
@@ -653,16 +644,15 @@ public class Parser : IAsyncDisposable
     }
 
     private async Task<PortalsActionsResponse?> GetPortalsActivity(string name, string model, string backdrop,
-        bool searchBackdrop, int page)
+        bool searchBackdrop)
     {
-        // https://portals-market.com/api/market/actions/?offset=0&limit=20&filter_by_backdrops=Ranger+Green&filter_by_collections=Big+Year&filter_by_models=Jelly+Year&sort_by=listed_at+desc
-        var url = $"https://portals-market.com/api/market/actions/?offset={page * 20}&limit=20" +
+        var url = "https://portals-market.com/api/market/actions/?offset=0&limit=20" +
                   (searchBackdrop
                       ? $"&filter_by_backdrops={backdrop.Replace(' ', '+')}"
                       : string.Empty) +
                   $"&filter_by_collections={name.Replace(' ', '+')}" +
                   $"&filter_by_models={model.Replace(' ', '+')}" +
-                  "&sort_by=listed_at+desc";
+                  "&sort_by=listed_at+desc&action_types=buy";
         try
         {
             using var response = await _portalsHttpClientPool.SendAsync(url, HttpMethod.Get);
@@ -688,7 +678,7 @@ public class Parser : IAsyncDisposable
         {
             try
             {
-                await TonnelGetMarketGifts();
+                await GetMarketGifts();
             }
             catch (Exception e)
             {
@@ -699,9 +689,66 @@ public class Parser : IAsyncDisposable
         }
     }
 
-    private async Task TonnelGetMarketGifts()
+    private async Task GetMarketGifts()
     {
-        await TonnelGetMarketGiftPage(1);
+        await Task.WhenAll(
+            TonnelGetMarketGiftPage(1),
+            PortalsGetMarketGiftPage(1)
+        );
+    }
+
+    private async Task PortalsGetMarketGiftPage(int page)
+    {
+        try
+        {
+            using var response = await _portalsHttpClientPool.SendAsync(
+                $"https://portals-market.com/api/nfts/search?offset={(page - 1) * 50}&limit=50&sort_by=listed_at+desc&status=listed",
+                HttpMethod.Get);
+            if (!response.IsSuccessStatusCode)
+                throw new Exception(
+                    $"Не удалось получить страницу подарков на порталах. Статус код: {response.StatusCode}");
+            var responseData = await response.Content.ReadFromJsonAsync<PortalsSearchResponse>();
+            if (responseData?.Results == null || responseData.Results.Length == 0)
+                throw new Exception("Не удалось получить данные о подарках на порталах.");
+            foreach (var portalsSearchResult in responseData.Results)
+            {
+                if (portalsSearchResult.ExternalCollectionNumber < 0)
+                    continue;
+                try
+                {
+                    var cacheKey = $"portalsGiftInfo_{portalsSearchResult.Id}_{portalsSearchResult.Price}";
+                    var name = portalsSearchResult.Name?.Trim();
+                    var modelAttribute = portalsSearchResult.Attributes?.FirstOrDefault(x => x.Type == "model");
+                    var model = modelAttribute?.Value?.Trim();
+                    var modelPercent = modelAttribute!.RarityPerMille;
+                    var backdropAttribute = portalsSearchResult.Attributes?.FirstOrDefault(x => x.Type == "backdrop");
+                    var backdrop = backdropAttribute?.Value?.Trim();
+                    var backdropPercent = backdropAttribute?.RarityPerMille;
+                    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(model) ||
+                        string.IsNullOrWhiteSpace(backdrop))
+                        continue;
+                    await _giftQueue.Writer.WriteAsync(
+                        new GiftQueueItem
+                        {
+                            Name = name,
+                            Model = model,
+                            ModelPercent = (double)modelPercent!,
+                            Backdrop = backdrop,
+                            BackdropPercent = (double)backdropPercent!,
+                            CacheKey = cacheKey
+                        }, _cancellationTokenSource.Token);
+                }
+                catch (Exception e)
+                {
+                    Logger.Warn(
+                        $"Ошибка при добавлении в очередь подарка {portalsSearchResult.Id}: {e.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Ошибка при получении страницы подарков: {ex.Message}");
+        }
     }
 
     private async Task TonnelGetMarketGiftPage(int page)
@@ -765,7 +812,7 @@ public class Parser : IAsyncDisposable
                 catch (Exception e)
                 {
                     Logger.Warn(
-                        $"Ошибка при получении информации о подарке {tonnelRelayerGiftInfo.GiftId}: {e.Message}");
+                        $"Ошибка при добавлении в очередь подарка {tonnelRelayerGiftInfo.GiftId}: {e.Message}");
                 }
             }
         }

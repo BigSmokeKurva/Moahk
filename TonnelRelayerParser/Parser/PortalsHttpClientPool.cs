@@ -100,7 +100,7 @@ public class PortalsHttpClientPool : IDisposable
                 if (clientTuple.Client != null)
                 {
                     client = clientTuple.Client;
-                    _cache.Add(clientTuple.Id, 0, DateTimeOffset.UtcNow.AddSeconds(1.5));
+                    _cache.Add(clientTuple.Id, 0, DateTimeOffset.UtcNow.AddSeconds(2));
                 }
             }
 

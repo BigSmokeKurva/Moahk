@@ -15,13 +15,15 @@ public static class TelegramGiftManager
         var response = await Client.GetStringAsync($"https://t.me/nft/{giftId}");
         using var document = await Parser.ParseDocumentAsync(response);
         var modelElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(2) > td:nth-child(2)");
-        var model = modelElement?.TextContent.Split(' ')[0];
+        var model = modelElement?.TextContent[..modelElement.TextContent.LastIndexOf(' ')];
         var modelPercentage = modelElement?.QuerySelector("mark")?.TextContent;
         var backdropElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(3) > td:nth-child(2)");
-        var backdrop = backdropElement?.TextContent.Split(' ')[0];
+        var backdrop = backdropElement?.TextContent[..backdropElement.TextContent.LastIndexOf(' ')];
+        ;
         var backdropPercentage = backdropElement?.QuerySelector("mark")?.TextContent;
         var symbolElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)");
-        var symbol = symbolElement?.TextContent.Split(' ')[0];
+        var symbol = symbolElement?.TextContent[..symbolElement.TextContent.LastIndexOf(' ')];
+        ;
         var symbolPercentage = symbolElement?.QuerySelector("mark")?.TextContent;
         var quantityElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(5) > td:nth-child(2)");
         var quantityText = quantityElement?.TextContent;
