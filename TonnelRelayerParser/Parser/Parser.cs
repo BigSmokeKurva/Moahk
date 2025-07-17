@@ -100,13 +100,13 @@ public class Parser : IAsyncDisposable
                 #region С фоном
 
                 // получение activity за последние 14 дней
-                var historyData = await GetTonnelActivity(giftInfo);
-                if (historyData == null || historyData.Length == 0) continue;
-                var lastOneWeekMaxPrice = historyData
+                var tonnelActivity = await GetTonnelActivity(giftInfo);
+                if (tonnelActivity == null || tonnelActivity.Length == 0) continue;
+                var lastOneWeekActivity = tonnelActivity
                     .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-7) &&
                                 x.GiftId > 0)
                     .ToArray();
-                var activity = lastOneWeekMaxPrice.Length switch
+                var activity = lastOneWeekActivity.Length switch
                 {
                     < 5 => Activity.Low,
                     < 10 => Activity.Medium,
@@ -182,7 +182,7 @@ public class Parser : IAsyncDisposable
                 }
 
                 // математика
-                await MathSecondFloor(gift, tonnelGiftSearch, portalsGiftSearch, lastOneWeekMaxPrice,
+                await MathSecondFloor(gift, tonnelGiftSearch, portalsGiftSearch, lastOneWeekActivity,
                     Criteria.SecondFloor);
 
                 #endregion
@@ -190,13 +190,13 @@ public class Parser : IAsyncDisposable
                 #region Без фона
 
                 // получение activity за последние 14 дней
-                historyData = await GetTonnelActivity(giftInfo, false);
-                if (historyData == null || historyData.Length == 0) continue;
-                lastOneWeekMaxPrice = historyData
+                tonnelActivity = await GetTonnelActivity(giftInfo, false);
+                if (tonnelActivity == null || tonnelActivity.Length == 0) continue;
+                lastOneWeekActivity = tonnelActivity
                     .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-7) &&
                                 x.GiftId > 0)
                     .ToArray();
-                activity = lastOneWeekMaxPrice.Length switch
+                activity = lastOneWeekActivity.Length switch
                 {
                     < 5 => Activity.Low,
                     < 10 => Activity.Medium,
@@ -271,7 +271,7 @@ public class Parser : IAsyncDisposable
                 }
 
                 // математика
-                await MathSecondFloor(gift, tonnelGiftSearch, portalsGiftSearch, lastOneWeekMaxPrice,
+                await MathSecondFloor(gift, tonnelGiftSearch, portalsGiftSearch, lastOneWeekActivity,
                     Criteria.SecondFloorWithoutBackdrop);
 
                 #endregion
@@ -363,7 +363,7 @@ public class Parser : IAsyncDisposable
 
     private async Task MathSecondFloor(
         Gift gift,
-        TonnelSearch[] tonnelSearch, PortalsSearch? portalsSearch, TonnelRelayerHistoryGiftInfo[] lastOneWeekMaxPrice,
+        TonnelSearch[] tonnelSearch, PortalsSearch? portalsSearch, TonnelRelayerHistoryGiftInfo[] lastOneWeekActivity,
         Criteria criteria)
     {
         double secondFloorPrice;
@@ -439,11 +439,11 @@ public class Parser : IAsyncDisposable
         var percentDiff = (secondFloorPrice - gift.Price) / secondFloorPrice * 100.0;
         if (percentDiff < 0)
             return;
-        var lastTwoWeeksPrices = lastOneWeekMaxPrice.Select(x => (double)x.Price!).ToArray();
+        var lastOneWeekActivityPrices = lastOneWeekActivity.Select(x => (double)x.Price!).ToArray();
         double? percentile25 = null;
         try
         {
-            percentile25 = lastTwoWeeksPrices.Percentile(25);
+            percentile25 = lastOneWeekActivityPrices.Percentile(25);
         }
         catch
         {
@@ -453,14 +453,14 @@ public class Parser : IAsyncDisposable
         double? percentile75 = null;
         try
         {
-            percentile75 = lastTwoWeeksPrices.Percentile(75);
+            percentile75 = lastOneWeekActivityPrices.Percentile(75);
         }
         catch
         {
             // ignored
         }
 
-        var lastTwoWeeksMaxPrice = lastOneWeekMaxPrice.OrderByDescending(x => x.Price).FirstOrDefault()?.Price;
+        var lastOneWeekMaxPrice = lastOneWeekActivity.OrderByDescending(x => x.Price).FirstOrDefault()?.Price;
         if (gift.GiftInfo is null)
         {
             var telegramGiftInfo = await GiftManager.GetGiftInfoAsync(gift.TelegramGiftId);
@@ -468,7 +468,7 @@ public class Parser : IAsyncDisposable
         }
 
         await _telegramBot.SendSignal(gift, percentDiff, secondFloorPrice, percentile25, percentile75,
-            lastTwoWeeksMaxPrice, criteria);
+            lastOneWeekMaxPrice, criteria);
     }
 
     private async Task<PortalsSearch?> PortalsSearchGift(string? backdrop, string model, string collection)
