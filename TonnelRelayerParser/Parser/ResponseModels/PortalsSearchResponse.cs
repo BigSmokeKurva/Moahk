@@ -2,9 +2,9 @@
 
 namespace Moahk.Parser.ResponseModels;
 
-public class PortalsSearch
+public class PortalsSearchResponse
 {
-    [JsonPropertyName("results")] public Result[]? Results { get; set; }
+    [JsonPropertyName("results")] public PortalsGiftItemSearch[]? Results { get; set; }
 
     public class Attribute
     {
@@ -15,7 +15,7 @@ public class PortalsSearch
         [JsonPropertyName("rarity_per_mille")] public double? RarityPerMille { get; set; }
     }
 
-    public class Result
+    public class PortalsGiftItemSearch
     {
         [JsonPropertyName("id")] public string? Id { get; set; }
 

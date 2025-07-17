@@ -2,7 +2,7 @@
 
 namespace Moahk.Parser.ResponseModels;
 
-public class TonnelRelayerHistoryGiftInfo
+public class TonnelRelayerHistoryGiftInfoResponse
 {
     [JsonPropertyName("_id")] public string? Id { get; set; }
     [JsonPropertyName("gift_id")] public long? GiftId { get; set; }

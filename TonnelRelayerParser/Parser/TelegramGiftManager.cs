@@ -4,13 +4,13 @@ using NLog;
 
 namespace Moahk.Parser;
 
-public static class GiftManager
+public static class TelegramGiftManager
 {
     private static readonly HttpClient Client = new();
     private static readonly HtmlParser Parser = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public static async Task<GiftInfo> GetGiftInfoAsync(string giftId)
+    public static async Task<TelegramGiftInfo> GetGiftInfoAsync(string giftId)
     {
         var response = await Client.GetStringAsync($"https://t.me/nft/{giftId}");
         using var document = await Parser.ParseDocumentAsync(response);
@@ -31,7 +31,7 @@ public static class GiftManager
             backdropPercentage is null || symbol is null || symbolPercentage is null ||
             quantityParts is null) throw new Exception($"Не удалось получить информацию о подарке {giftId}");
 
-        return new GiftInfo
+        return new TelegramGiftInfo
         {
             Model = (model, double.Parse(modelPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
             Backdrop = (backdrop,

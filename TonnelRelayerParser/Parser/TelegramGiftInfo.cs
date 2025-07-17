@@ -1,6 +1,6 @@
 ﻿namespace Moahk.Parser;
 
-public struct GiftInfo
+public struct TelegramGiftInfo
 {
     public (string, double) Model;
     public (string, double) Backdrop;
