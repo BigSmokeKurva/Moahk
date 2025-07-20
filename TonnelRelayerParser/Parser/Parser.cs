@@ -132,11 +132,17 @@ public class Parser : IAsyncDisposable
             return null;
         }
 
-        var activityHistory = await GetTonnelActivity(giftQueueItem.Name, giftQueueItem.Model,
-            giftQueueItem.ModelPercent, giftQueueItem.Backdrop, giftQueueItem.BackdropPercent, searchBackdrop);
+        var activityHistorySale = await GetTonnelActivity(giftQueueItem.Name, giftQueueItem.Model,
+            giftQueueItem.ModelPercent, giftQueueItem.Backdrop, giftQueueItem.BackdropPercent, searchBackdrop, "SALE");
+        var activityHistoryInternalSale = await GetTonnelActivity(giftQueueItem.Name, giftQueueItem.Model,
+            giftQueueItem.ModelPercent, giftQueueItem.Backdrop, giftQueueItem.BackdropPercent, searchBackdrop,
+            "INTERNAL_SALE");
+        var activityHistory = activityHistorySale?
+            .Concat(activityHistoryInternalSale ?? [])
+            .OrderByDescending(x => x.Timestamp)
+            .ToArray();
         var threeDaysActivity = activityHistory?
-            .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-3) &&
-                        x is { GiftId: > 0, Type: "INTERNAL_SALE" or "SALE" })
+            .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-3))
             .ToArray();
         var activity = GetActivityFromHistory(threeDaysActivity);
         var minPriceGift = searchGifts.MinBy(x => x.Price);
@@ -293,7 +299,7 @@ public class Parser : IAsyncDisposable
     }
 
     private async Task<TonnelRelayerHistoryGiftInfoResponse[]?> GetTonnelActivity(string name, string model,
-        double modelPercent, string backdrop, double backdropPercent, bool searchBackdrop)
+        double modelPercent, string backdrop, double backdropPercent, bool searchBackdrop, string type)
     {
         try
         {
@@ -307,7 +313,7 @@ public class Parser : IAsyncDisposable
                             authData = TelegramRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
-                            type = "ALL",
+                            type,
                             filter = new
                             {
                                 gift_name = name,
@@ -325,7 +331,7 @@ public class Parser : IAsyncDisposable
                             authData = TelegramRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
-                            type = "ALL",
+                            type,
                             filter = new
                             {
                                 gift_name = name,
@@ -442,6 +448,40 @@ public class Parser : IAsyncDisposable
                 gift.PercentDiffWithCommission = percentDiffWithCommission;
             }
         }
+        /*
+         * самый дешевый на tonnel
+         * second floor на tonnel null и first floor на portals null -> скип подарка
+         * second floor на tonnel null -> second floor = first floor на portals
+         * first floor на portals null -> second floor = second floor на tonnel
+         * second floor на tonnel < first floor на portals -> second floor = second floor на tonnel
+         * second floor на tonnel > first floor на portals -> second floor = first floor на portals
+         * самый дешевый на portals
+         * second floor на portals null и first floor на tonnel null -> скип подарка
+         * first floor на tonnel null -> second floor = second floor на portals
+         * second floor на portals < first floor на tonnel -> second floor = second floor на portals
+         * second floor на portals > first floor на tonnel -> second floor = first floor на tonnel
+         */
+        // выбор самого дешевого подарка
+        // tonnel
+        // if ((gift.TonnelGift is not null && gift.PortalsGift is null) || (gift.TonnelGift is not null &&gift.PortalsGift is not null &&gift.TonnelGift.Price < gift.PortalsGift.Price))
+        // {
+        //     if (gift.TonnelGift?.SecondFloorGift is null && gift.PortalsGift is null)
+        //     {
+        //         return;
+        //     }
+        //     if (gift.TonnelGift?.SecondFloorGift is null)
+        //     {
+        //         var tonnelGift = gift.TonnelGift;
+        //         var portalsGift = gift.PortalsGift;
+        //         var secondFloorPrice = portalsGift!.Price;
+        //         var percentDiff = MathPercentDiff(tonnelGift!.Price, secondFloorPrice);
+        //         var percentDiffWithCommission = MathPercentDiffWithCommission(tonnelGift.Price, secondFloorPrice);
+        //         gift.Type = SignalType.TonnelPortals;
+        //         gift.PercentDiff = percentDiff;
+        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
+        //     }
+        //     else if()
+        // }
 
         if (gift.PercentDiff < 0)
             return;

@@ -182,7 +182,7 @@ public class TelegramBot : IDisposable
                       🔍 Что я умею:
                       - Постоянно сканирую маркеты и ищу выгодные для покупки предложения
                       - Понимаю "грязный" подарок или нет
-                      - Анализирую активность и цены продаж каждого конкретного вида подарка за последние 2 недели
+                      - Анализирую активность и цены продаж каждого конкретного вида подарка
                       - Нахожу подарки с высокой перспективой для перепродажи
                       - Фильтрую по цене и проценту выгоды
                       - Отправляю только те предложения, которые соответствуют вашим настройкам
@@ -250,7 +250,6 @@ public class TelegramBot : IDisposable
     private async Task AdminSetTimeCommand(Message msg, string args, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        // Пример: /set_time 676456478 2023-10-01T12:00:00
         var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 2 || !long.TryParse(parts[0], out var userId) ||
             !DateTimeOffset.TryParse(parts[1], null, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
@@ -587,7 +586,8 @@ public class TelegramBot : IDisposable
             amount = price,
             amount_currency = "USDT",
             type = "purchase",
-            lifetime = 1000
+            lifetime = 1000,
+            redirect_url = $"https://t.me/{_me.Username}"
         });
         var invoice = await r.Content.ReadFromJsonAsync<CrystalpayInvoiceCreateResponse>();
         if (invoice is null || invoice.Error)
@@ -1326,7 +1326,7 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.TonnelGift.ActivityLastSell is not null ? $"{gift.TonnelGift.ActivityLastSell.Price:F2} TON ({gift.TonnelGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
 
                        --- [TONNEL (2 флор)]({gift.TonnelGift.SecondFloorGift!.BotUrl}) --- 
                        {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
@@ -1363,9 +1363,9 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.TonnelGift.ActivityLastSell is not null ? $"{gift.TonnelGift.ActivityLastSell.Price:F2} TON ({gift.TonnelGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
 
-                       --- [PORTALS]({gift.PortalsGift!.BotUrl}) --- 
+                       --- [PORTALS (2 флор)]({gift.PortalsGift!.BotUrl}) --- 
                        {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                        💲 *Текущая цена:* {gift.PortalsGift.Price:F2} TON
                        🔥 *Активность:* {gift.PortalsGift.Activity switch {
@@ -1376,7 +1376,7 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.PortalsGift.ActivityLastSell is not null ? $"{gift.PortalsGift.ActivityLastSell.Price:F2} TON ({gift.PortalsGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
                        """;
                 break;
             }
@@ -1407,7 +1407,7 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.PortalsGift.ActivityLastSell is not null ? $"{gift.PortalsGift.ActivityLastSell.Price:F2} TON ({gift.PortalsGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
 
                        --- [PORTALS (2 флор)]({gift.PortalsGift.SecondFloorGift!.BotUrl}) --- 
                        {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
@@ -1443,9 +1443,9 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.PortalsGift.ActivityLastSell is not null ? $"{gift.PortalsGift.ActivityLastSell.Price:F2} TON ({gift.PortalsGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
 
-                       --- [TONNEL]({gift.TonnelGift!.BotUrl}) --- 
+                       --- [TONNEL (2 флор)]({gift.TonnelGift!.BotUrl}) --- 
                        {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                        💲 *Текущая цена:* {gift.TonnelGift.Price:F2} TON
                        🔥 *Активность:* {gift.TonnelGift.Activity switch {
@@ -1456,7 +1456,7 @@ public class TelegramBot : IDisposable
                        ⏱️ *Последняя сделка:* {(gift.TonnelGift.ActivityLastSell is not null ? $"{gift.TonnelGift.ActivityLastSell.Price:F2} TON ({gift.TonnelGift.ActivityLastSell.Time:MM.dd hh:mm} UTC)" : "Недостаточно данных")}
                        📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75:F2} TON" : "Недостаточно данных")}
-                       🚀 *Максимальная цена (за 7д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+                       🚀 *Максимальная цена (за 3д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
                        """;
                 break;
             }
