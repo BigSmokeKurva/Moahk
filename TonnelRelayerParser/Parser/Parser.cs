@@ -6,7 +6,6 @@ using Moahk.Data.Enums;
 using Moahk.Other;
 using Moahk.Parser.ResponseModels;
 using NLog;
-using Action = Moahk.Parser.ResponseModels.Action;
 
 namespace Moahk.Parser;
 
@@ -38,17 +37,23 @@ public abstract class GiftBase
     public double? Percentile75 { get; set; }
     public double? ActivityMaxPrice { get; set; }
     public ActivityLastSell? ActivityLastSell { get; set; }
+    public Action[]? ActivityHistory3Days { get; set; }
+    public Action[]? ActivityHistoryAll { get; set; }
 }
 
 public class TonnelGift : GiftBase
 {
-    public required TonnelRelayerHistoryGiftInfoResponse[]? ActivityHistory { get; init; }
     public required string SiteUrl { get; init; }
 }
 
 public class PortalsGift : GiftBase
 {
-    public required Action[]? ActivityHistory { get; init; }
+}
+
+public class Action
+{
+    public required DateTimeOffset CreatedAt { get; init; }
+    public required double Price { get; init; }
 }
 
 public class Gift
@@ -141,10 +146,6 @@ public class Parser : IAsyncDisposable
             .Concat(activityHistoryInternalSale ?? [])
             .OrderByDescending(x => x.Timestamp)
             .ToArray();
-        var threeDaysActivity = activityHistory?
-            .Where(x => x.Timestamp.HasValue && x.Timestamp.Value >= DateTimeOffset.UtcNow.AddDays(-3))
-            .ToArray();
-        var activity = GetActivityFromHistory(threeDaysActivity);
         var minPriceGift = searchGifts.MinBy(x => x.Price);
         var price = CalculateTonnelPriceWithCommission((double)minPriceGift!.Price!);
         var telegramGiftId = string.Concat(minPriceGift.Name?.Where(char.IsLetter) ?? string.Empty)
@@ -165,12 +166,23 @@ public class Parser : IAsyncDisposable
             };
         }
 
+        var activityHistoryAll = activityHistory?
+            .Select(x => new Action
+            {
+                CreatedAt = (DateTimeOffset)x.Timestamp!,
+                Price = (double)x.Price!
+            }).ToArray();
+        var actionHistory3days = activityHistoryAll?
+            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-3))
+            .ToArray();
+        var activity = GetActivityFromHistory(actionHistory3days);
         return new TonnelGift
         {
             Name = minPriceGift.Name!,
             Model = minPriceGift.Model!,
             Backdrop = minPriceGift.Backdrop!,
-            ActivityHistory = threeDaysActivity,
+            ActivityHistoryAll = activityHistoryAll,
+            ActivityHistory3Days = actionHistory3days,
             Activity = activity,
             Price = price,
             TelegramGiftId = telegramGiftId,
@@ -200,14 +212,10 @@ public class Parser : IAsyncDisposable
         var activityHistory = await GetPortalsActivity(giftQueueItem.Name, giftQueueItem.Model,
             giftQueueItem.Backdrop, searchBackdrop);
 
-        var threeDaysActivity = activityHistory?.Actions?.Where(x =>
-                x.CreatedAt.HasValue && x.CreatedAt.Value >= DateTimeOffset.UtcNow.AddDays(-3) && x.Type == "purchase")
-            .ToArray();
-        var activity = GetActivityFromHistory(threeDaysActivity);
         var minPriceGift = searchGifts.Results[0];
         var price = double.Parse(minPriceGift.Price!, CultureInfo.InvariantCulture);
         var telegramGiftId = string.Concat(minPriceGift.Name?.Where(char.IsLetter) ?? string.Empty)
-                             + '-' + minPriceGift!.ExternalCollectionNumber;
+                             + '-' + minPriceGift.ExternalCollectionNumber;
         var telegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(telegramGiftId);
         SecondFloorGift? secondFloorGift = null;
         if (searchGifts.Results.Length >= 2)
@@ -225,12 +233,23 @@ public class Parser : IAsyncDisposable
             };
         }
 
+        var activityHistoryAll = activityHistory?.Actions?
+            .Select(x => new Action
+            {
+                CreatedAt = (DateTimeOffset)x.CreatedAt!,
+                Price = double.Parse(x.Amount!, CultureInfo.InvariantCulture)
+            }).ToArray();
+        var actionHistory3days = activityHistoryAll?
+            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-3))
+            .ToArray();
+        var activity = GetActivityFromHistory(actionHistory3days);
         return new PortalsGift
         {
             Name = minPriceGift.Name!,
             Model = minPriceGift.Attributes!.First(x => x.Type == "model").Value!,
             Backdrop = minPriceGift.Attributes!.First(x => x.Type == "backdrop").Value!,
-            ActivityHistory = threeDaysActivity?.ToArray(),
+            ActivityHistoryAll = activityHistoryAll,
+            ActivityHistory3Days = actionHistory3days,
             Activity = activity,
             Price = price,
             TelegramGiftId = telegramGiftId,
@@ -448,51 +467,16 @@ public class Parser : IAsyncDisposable
                 gift.PercentDiffWithCommission = percentDiffWithCommission;
             }
         }
-        /*
-         * самый дешевый на tonnel
-         * second floor на tonnel null и first floor на portals null -> скип подарка
-         * second floor на tonnel null -> second floor = first floor на portals
-         * first floor на portals null -> second floor = second floor на tonnel
-         * second floor на tonnel < first floor на portals -> second floor = second floor на tonnel
-         * second floor на tonnel > first floor на portals -> second floor = first floor на portals
-         * самый дешевый на portals
-         * second floor на portals null и first floor на tonnel null -> скип подарка
-         * first floor на tonnel null -> second floor = second floor на portals
-         * second floor на portals < first floor на tonnel -> second floor = second floor на portals
-         * second floor на portals > first floor на tonnel -> second floor = first floor на tonnel
-         */
-        // выбор самого дешевого подарка
-        // tonnel
-        // if ((gift.TonnelGift is not null && gift.PortalsGift is null) || (gift.TonnelGift is not null &&gift.PortalsGift is not null &&gift.TonnelGift.Price < gift.PortalsGift.Price))
-        // {
-        //     if (gift.TonnelGift?.SecondFloorGift is null && gift.PortalsGift is null)
-        //     {
-        //         return;
-        //     }
-        //     if (gift.TonnelGift?.SecondFloorGift is null)
-        //     {
-        //         var tonnelGift = gift.TonnelGift;
-        //         var portalsGift = gift.PortalsGift;
-        //         var secondFloorPrice = portalsGift!.Price;
-        //         var percentDiff = MathPercentDiff(tonnelGift!.Price, secondFloorPrice);
-        //         var percentDiffWithCommission = MathPercentDiffWithCommission(tonnelGift.Price, secondFloorPrice);
-        //         gift.Type = SignalType.TonnelPortals;
-        //         gift.PercentDiff = percentDiff;
-        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
-        //     }
-        //     else if()
-        // }
 
-        if (gift.PercentDiff < 0)
+        if (gift.Type is null)
             return;
-
         if (gift.Type == SignalType.TonnelTonnel)
         {
             // percentile25
             try
             {
-                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory?
-                    .Select(x => (double)x.Price!)
+                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory3Days?
+                    .Select(x => x.Price)
                     .Percentile(25);
             }
             catch
@@ -503,8 +487,8 @@ public class Parser : IAsyncDisposable
             // percentile75
             try
             {
-                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory?
-                    .Select(x => (double)x.Price!)
+                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory3Days?
+                    .Select(x => x.Price)
                     .Percentile(75);
             }
             catch
@@ -513,18 +497,18 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory?
+            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory3Days?
                 .OrderByDescending(x => x.Price)
                 .FirstOrDefault()?.Price;
             // activity last sell
-            var lastSell = gift.TonnelGift.ActivityHistory?
-                .OrderByDescending(x => x.Timestamp)
+            var lastSell = gift.TonnelGift.ActivityHistory3Days?
+                .OrderByDescending(x => x.CreatedAt)
                 .FirstOrDefault();
-            if (lastSell is { Price: not null, Timestamp: not null })
+            if (lastSell is not null)
                 gift.TonnelGift.ActivityLastSell = new ActivityLastSell
                 {
-                    Price = lastSell.Price.Value,
-                    Time = lastSell.Timestamp.Value
+                    Price = lastSell.Price,
+                    Time = lastSell.CreatedAt
                 };
         }
         else if (gift.Type is SignalType.TonnelPortals or SignalType.PortalsTonnel)
@@ -533,8 +517,8 @@ public class Parser : IAsyncDisposable
             // percentile25
             try
             {
-                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory?
-                    .Select(x => (double)x.Price!)
+                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory3Days?
+                    .Select(x => x.Price)
                     .Percentile(25);
             }
             catch
@@ -545,8 +529,8 @@ public class Parser : IAsyncDisposable
             // percentile75
             try
             {
-                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory?
-                    .Select(x => (double)x.Price!)
+                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory3Days?
+                    .Select(x => x.Price)
                     .Percentile(75);
             }
             catch
@@ -555,26 +539,24 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory?
+            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory3Days?
                 .OrderByDescending(x => x.Price)
                 .FirstOrDefault()?.Price;
             // activity last price
-            var lastSell = gift.TonnelGift.ActivityHistory?
-                .OrderByDescending(x => x.Timestamp)
+            var lastSell = gift.TonnelGift.ActivityHistory3Days?
+                .OrderByDescending(x => x.CreatedAt)
                 .FirstOrDefault();
-            if (lastSell is { Price: not null, Timestamp: not null })
+            if (lastSell is not null)
                 gift.TonnelGift.ActivityLastSell = new ActivityLastSell
                 {
-                    Price = lastSell.Price.Value,
-                    Time = lastSell.Timestamp.Value
+                    Price = lastSell.Price,
+                    Time = lastSell.CreatedAt
                 };
-            // portals
-            var portalsActivityPrices = gift.PortalsGift?.ActivityHistory?
-                .Select(x => (x, double.Parse(x.Amount!, CultureInfo.InvariantCulture))).ToArray();
             // percentile25
             try
             {
-                gift.PortalsGift!.Percentile25 = portalsActivityPrices?.Select(x => x.Item2).Percentile(25);
+                gift.PortalsGift!.Percentile25 =
+                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
             }
             catch
             {
@@ -584,7 +566,8 @@ public class Parser : IAsyncDisposable
             // percentile75
             try
             {
-                gift.PortalsGift!.Percentile75 = portalsActivityPrices?.Select(x => x.Item2).Percentile(75);
+                gift.PortalsGift!.Percentile75 =
+                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
             }
             catch
             {
@@ -592,26 +575,27 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices is { Length: > 0 }
-                ? portalsActivityPrices.Select(x => x.Item2).Max()
-                : null;
+            gift.PortalsGift!.ActivityMaxPrice = gift.PortalsGift?.ActivityHistory3Days?
+                .OrderByDescending(x => x.Price)
+                .FirstOrDefault()?.Price;
             // activity last price
-            gift.PortalsGift.ActivityLastSell = portalsActivityPrices is { Length: > 0 }
-                ? new ActivityLastSell
+            var lastSellPortals = gift.PortalsGift?.ActivityHistory3Days?
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefault();
+            if (lastSellPortals is not null)
+                gift.PortalsGift!.ActivityLastSell = new ActivityLastSell
                 {
-                    Price = portalsActivityPrices[0].Item2,
-                    Time = portalsActivityPrices[0].Item1.CreatedAt!.Value
-                }
-                : null;
+                    Price = lastSellPortals.Price,
+                    Time = lastSellPortals.CreatedAt
+                };
         }
         else if (gift.Type == SignalType.PortalsPortals)
         {
-            var portalsActivityPrices = gift.PortalsGift?.ActivityHistory?
-                .Select(x => (x, double.Parse(x.Amount!, CultureInfo.InvariantCulture))).ToArray();
             // percentile25
             try
             {
-                gift.PortalsGift!.Percentile25 = portalsActivityPrices?.Select(x => x.Item2).Percentile(25);
+                gift.PortalsGift!.Percentile25 =
+                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
             }
             catch
             {
@@ -621,7 +605,8 @@ public class Parser : IAsyncDisposable
             // percentile75
             try
             {
-                gift.PortalsGift!.Percentile75 = portalsActivityPrices?.Select(x => x.Item2).Percentile(75);
+                gift.PortalsGift!.Percentile75 =
+                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
             }
             catch
             {
@@ -629,17 +614,19 @@ public class Parser : IAsyncDisposable
             }
 
             // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = portalsActivityPrices is { Length: > 0 }
-                ? portalsActivityPrices.Select(x => x.Item2).Max()
-                : null;
+            gift.PortalsGift!.ActivityMaxPrice = gift.PortalsGift?.ActivityHistory3Days?
+                .OrderByDescending(x => x.Price)
+                .FirstOrDefault()?.Price;
             // activity last price
-            gift.PortalsGift.ActivityLastSell = portalsActivityPrices is { Length: > 0 }
-                ? new ActivityLastSell
+            var lastSell = gift.PortalsGift?.ActivityHistory3Days?
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefault();
+            if (lastSell is not null)
+                gift.PortalsGift!.ActivityLastSell = new ActivityLastSell
                 {
-                    Price = portalsActivityPrices[0].Item2,
-                    Time = portalsActivityPrices[0].Item1.CreatedAt!.Value
-                }
-                : null;
+                    Price = lastSell.Price,
+                    Time = lastSell.CreatedAt
+                };
         }
 
         await _telegramBot.SendSignal(gift, criteria);

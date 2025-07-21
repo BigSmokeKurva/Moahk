@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Net.Http.Json;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Moahk.Data;
 using Moahk.Data.Entities;
@@ -1267,33 +1268,44 @@ public class TelegramBot : IDisposable
 
     {
         await using var dbContext = new ApplicationDbContext();
-        Data.Entities.User[] users;
-        switch (gift.Type)
+        GiftBase baseGift = (gift.Type switch
         {
-            case SignalType.TonnelTonnel or SignalType.TonnelPortals:
-                users = await dbContext.Users
-                    .AsNoTracking()
-                    .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                                x.PriceMin <= gift.TonnelGift!.Price && x.PriceMax >= gift.TonnelGift.Price &&
-                                x.ProfitPercent <= gift.PercentDiff &&
-                                x.ModelPercentMin <= gift.TonnelGift.TelegramGiftInfo.Model.Item2 &&
-                                x.ModelPercentMax >= gift.TonnelGift.TelegramGiftInfo.Model.Item2)
-                    .ToArrayAsync();
-                break;
-            case SignalType.PortalsPortals or SignalType.PortalsTonnel:
-                users = await dbContext.Users
-                    .AsNoTracking()
-                    .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                                x.PriceMin <= gift.PortalsGift!.Price && x.PriceMax >= gift.PortalsGift.Price &&
-                                x.ProfitPercent <= gift.PercentDiff &&
-                                x.ModelPercentMin <= gift.PortalsGift.TelegramGiftInfo.Model.Item2 &&
-                                x.ModelPercentMax >= gift.PortalsGift.TelegramGiftInfo.Model.Item2)
-                    .ToArrayAsync();
-                break;
-            default:
-                return;
+            SignalType.TonnelTonnel or SignalType.TonnelPortals => gift.TonnelGift,
+            SignalType.PortalsPortals or SignalType.PortalsTonnel => gift.PortalsGift,
+            _ => throw new Exception("Unknown gift type.")
+        })!;
+        var users = await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
+                        x.PriceMin <= baseGift.Price && x.PriceMax >= baseGift.Price &&
+                        x.ProfitPercent <= gift.PercentDiff &&
+                        x.ModelPercentMin <= baseGift.TelegramGiftInfo.Model.Item2 &&
+                        x.ModelPercentMax >= baseGift.TelegramGiftInfo.Model.Item2)
+            .OrderBy(x => Guid.NewGuid())
+            .ToArrayAsync();
+        if (users.Length == 0) return;
+
+        var tableBuilder = new StringBuilder();
+        tableBuilder.AppendLine("TONNEL           PORTALS");
+        tableBuilder.AppendLine("Цена   Дата      Цена   Дата");
+
+        for (var i = 0; i < 10; i++)
+        {
+            var tonnelAction = gift.TonnelGift?.ActivityHistoryAll is not null &&
+                               gift.TonnelGift.ActivityHistoryAll.Length > i
+                ? gift.TonnelGift.ActivityHistoryAll[i]
+                : null;
+            var portalsAction = gift.PortalsGift?.ActivityHistoryAll is not null &&
+                                gift.PortalsGift.ActivityHistoryAll.Length > i
+                ? gift.PortalsGift.ActivityHistoryAll[i]
+                : null;
+
+            tableBuilder.AppendLine(
+                $"{(tonnelAction?.Price is { } price1 ? price1.ToString("F1") : "N/A"),-7}{(tonnelAction?.CreatedAt is { } date1 ? date1.ToString("dd.MM") : "N/A"),-10}{(portalsAction?.Price is { } price2 ? price2.ToString("F1") : "N/A"),-7}{(portalsAction?.CreatedAt is { } date2 ? date2.ToString("dd.MM") : "N/A"),-10}"
+            );
         }
 
+        var table = tableBuilder.ToString();
         string msg;
         InlineKeyboardButton[][] buttons;
         switch (gift.Type)
@@ -1303,10 +1315,16 @@ public class TelegramBot : IDisposable
                 var telegramUrl = $"https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}";
                 buttons =
                 [
-                    [
-                        InlineKeyboardButton.WithUrl("Подарок", telegramUrl),
-                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
-                    ],
+                    gift.PortalsGift is not null
+                        ?
+                        [
+                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl),
+                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
+                        ]
+                        :
+                        [
+                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
+                        ],
                     [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
                 ];
                 msg = $"""
@@ -1331,6 +1349,11 @@ public class TelegramBot : IDisposable
                        --- [TONNEL (2 флор)]({gift.TonnelGift.SecondFloorGift!.BotUrl}) --- 
                        {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                        💲 *Текущая цена:* {gift.TonnelGift.SecondFloorGift!.Price:F2} TON
+
+                       📊История продаж:
+                       ```
+                       {table}
+                       ```
                        """;
                 break;
             }
@@ -1340,8 +1363,8 @@ public class TelegramBot : IDisposable
                 buttons =
                 [
                     [
-                        InlineKeyboardButton.WithUrl("Подарок", telegramUrl),
-                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
+                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl),
+                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
                     ],
                     [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
                 ];
@@ -1377,6 +1400,11 @@ public class TelegramBot : IDisposable
                        📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75:F2} TON" : "Недостаточно данных")}
                        🚀 *Максимальная цена (за 3д.):* {(gift.PortalsGift.ActivityMaxPrice is not null ? $"{gift.PortalsGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+
+                       📊История продаж:
+                       ```
+                       {table}
+                       ```
                        """;
                 break;
             }
@@ -1385,10 +1413,16 @@ public class TelegramBot : IDisposable
                 var telegramUrl = $"https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}";
                 buttons =
                 [
-                    [
-                        InlineKeyboardButton.WithUrl("Подарок", telegramUrl),
-                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
-                    ]
+                    gift.TonnelGift is not null
+                        ?
+                        [
+                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl),
+                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
+                        ]
+                        :
+                        [
+                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
+                        ]
                 ];
                 msg = $"""
                        [🎁]({telegramUrl}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2:F1}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2:F1}%)*
@@ -1412,6 +1446,11 @@ public class TelegramBot : IDisposable
                        --- [PORTALS (2 флор)]({gift.PortalsGift.SecondFloorGift!.BotUrl}) --- 
                        {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                        💲 *Текущая цена:* {gift.PortalsGift.SecondFloorGift!.Price:F2} TON
+
+                       📊История продаж:
+                       ```
+                       {table}
+                       ```
                        """;
                 break;
             }
@@ -1421,8 +1460,8 @@ public class TelegramBot : IDisposable
                 buttons =
                 [
                     [
-                        InlineKeyboardButton.WithUrl("Подарок", telegramUrl),
-                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
+                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl),
+                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
                     ]
                 ];
                 msg = $"""
@@ -1457,6 +1496,11 @@ public class TelegramBot : IDisposable
                        📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25:F2} TON" : "Недостаточно данных")}
                        📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75:F2} TON" : "Недостаточно данных")}
                        🚀 *Максимальная цена (за 3д.):* {(gift.TonnelGift.ActivityMaxPrice is not null ? $"{gift.TonnelGift.ActivityMaxPrice:F2} TON" : "Недостаточно данных")}
+
+                       📊История продаж:
+                       ```
+                       {table}
+                       ```
                        """;
                 break;
             }
