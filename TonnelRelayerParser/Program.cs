@@ -17,7 +17,7 @@ internal static class Program
     {
         Microsoft.Playwright.Program.Main(["install", "chromium"]);
         await ApplicationDbContextInitialiser.InitialiseAsync();
-        using var telegramRepository = new TelegramRepository();
+        using var telegramRepository = new TelegramAccountRepository();
         await telegramRepository.Start();
         await using var parser = new Parser.Parser();
         await parser.Start();

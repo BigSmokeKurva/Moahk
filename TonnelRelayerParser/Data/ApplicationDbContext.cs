@@ -27,6 +27,7 @@ public class ApplicationDbContext : DbContext
             entity.Property(x => x.Status).HasDefaultValue(Status.None);
             entity.Property(x => x.ReferralPercent).HasDefaultValue(25);
             entity.Property(x => x.ModelPercentMax).HasDefaultValue(100);
+            entity.Property(x => x.MessageType).HasDefaultValue(MessageType.Full);
             entity.HasOne(x => x.PromoCode);
         });
         modelBuilder.Entity<CrystalpayInvoice>(entity =>

@@ -5,7 +5,7 @@ using WTelegram;
 
 namespace Moahk.Parser;
 
-public class TelegramRepository : IDisposable
+public class TelegramAccountRepository : IDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -18,12 +18,12 @@ public class TelegramRepository : IDisposable
     private readonly Client _client;
 
 
-    static TelegramRepository()
+    static TelegramAccountRepository()
     {
         Helpers.Log = (_, _) => { };
     }
 
-    public TelegramRepository()
+    public TelegramAccountRepository()
     {
         _client = new Client(Config);
     }

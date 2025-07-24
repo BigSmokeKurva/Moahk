@@ -1,7 +1,8 @@
 ﻿namespace Moahk.Data.Enums;
 
-public enum Criteria
+[Flags]
+public enum Criteria : long
 {
-    SecondFloor,
-    SecondFloorWithoutBackdrop
+    SecondFloor = 1L << 0,
+    SecondFloorWithoutBackdrop = 1L << 1
 }

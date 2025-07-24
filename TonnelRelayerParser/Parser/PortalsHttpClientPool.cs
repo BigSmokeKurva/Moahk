@@ -117,7 +117,7 @@ public class PortalsHttpClientPool : IDisposable
                 var client = await GetHttpClient();
                 using var request = new HttpRequestMessage(method, url);
                 request.Headers.Authorization =
-                    new AuthenticationHeaderValue("tma", TelegramRepository.PortalsDecodedTgWebAppData);
+                    new AuthenticationHeaderValue("tma", TelegramAccountRepository.PortalsDecodedTgWebAppData);
                 var response = await client.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {

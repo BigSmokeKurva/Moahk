@@ -16,12 +16,6 @@ public class SecondFloorGift
     public required string BotUrl { get; init; }
 }
 
-public class ActivityLastSell
-{
-    public required double Price { get; init; }
-    public required DateTimeOffset Time { get; init; }
-}
-
 public abstract class GiftBase
 {
     public required string Name { get; init; }
@@ -35,10 +29,8 @@ public abstract class GiftBase
     public SecondFloorGift? SecondFloorGift { get; init; }
     public double? Percentile25 { get; set; }
     public double? Percentile75 { get; set; }
-    public double? ActivityMaxPrice { get; set; }
-    public ActivityLastSell? ActivityLastSell { get; set; }
-    public Action[]? ActivityHistory3Days { get; set; }
-    public Action[]? ActivityHistoryAll { get; set; }
+    public Action[]? ActivityHistory3Days { get; init; }
+    public Action[]? ActivityHistoryAll { get; init; }
 }
 
 public class TonnelGift : GiftBase
@@ -63,14 +55,6 @@ public class Gift
     public double? PercentDiffWithCommission { get; set; }
     public TonnelGift? TonnelGift { get; init; }
     public PortalsGift? PortalsGift { get; init; }
-}
-
-public enum SignalType
-{
-    TonnelTonnel,
-    TonnelPortals,
-    PortalsPortals,
-    PortalsTonnel
 }
 
 internal record GiftQueueItem
@@ -144,6 +128,8 @@ public class Parser : IAsyncDisposable
             "INTERNAL_SALE");
         var activityHistory = activityHistorySale?
             .Concat(activityHistoryInternalSale ?? [])
+            .GroupBy(x => new { x.Timestamp, x.Price })
+            .Select(x => x.First())
             .OrderByDescending(x => x.Timestamp)
             .ToArray();
         var minPriceGift = searchGifts.MinBy(x => x.Price);
@@ -329,7 +315,7 @@ public class Parser : IAsyncDisposable
                         "https://gifts3.tonnel.network/api/saleHistory",
                         new
                         {
-                            authData = TelegramRepository.TonnelRelayerDecodedTgWebAppData,
+                            authData = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
                             type,
@@ -347,7 +333,7 @@ public class Parser : IAsyncDisposable
                         "https://gifts3.tonnel.network/api/saleHistory",
                         new
                         {
-                            authData = TelegramRepository.TonnelRelayerDecodedTgWebAppData,
+                            authData = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
                             type,
@@ -392,7 +378,7 @@ public class Parser : IAsyncDisposable
                         @ref = 0,
                         price_range = (object?)null,
                         user_auth =
-                            TelegramRepository.TonnelRelayerDecodedTgWebAppData
+                            TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData
                     });
             return response;
         }
@@ -495,21 +481,6 @@ public class Parser : IAsyncDisposable
             {
                 // ignored
             }
-
-            // activity max price
-            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory3Days?
-                .OrderByDescending(x => x.Price)
-                .FirstOrDefault()?.Price;
-            // activity last sell
-            var lastSell = gift.TonnelGift.ActivityHistory3Days?
-                .OrderByDescending(x => x.CreatedAt)
-                .FirstOrDefault();
-            if (lastSell is not null)
-                gift.TonnelGift.ActivityLastSell = new ActivityLastSell
-                {
-                    Price = lastSell.Price,
-                    Time = lastSell.CreatedAt
-                };
         }
         else if (gift.Type is SignalType.TonnelPortals or SignalType.PortalsTonnel)
         {
@@ -538,20 +509,6 @@ public class Parser : IAsyncDisposable
                 // ignored
             }
 
-            // activity max price
-            gift.TonnelGift!.ActivityMaxPrice = gift.TonnelGift.ActivityHistory3Days?
-                .OrderByDescending(x => x.Price)
-                .FirstOrDefault()?.Price;
-            // activity last price
-            var lastSell = gift.TonnelGift.ActivityHistory3Days?
-                .OrderByDescending(x => x.CreatedAt)
-                .FirstOrDefault();
-            if (lastSell is not null)
-                gift.TonnelGift.ActivityLastSell = new ActivityLastSell
-                {
-                    Price = lastSell.Price,
-                    Time = lastSell.CreatedAt
-                };
             // percentile25
             try
             {
@@ -573,21 +530,6 @@ public class Parser : IAsyncDisposable
             {
                 // ignored
             }
-
-            // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = gift.PortalsGift?.ActivityHistory3Days?
-                .OrderByDescending(x => x.Price)
-                .FirstOrDefault()?.Price;
-            // activity last price
-            var lastSellPortals = gift.PortalsGift?.ActivityHistory3Days?
-                .OrderByDescending(x => x.CreatedAt)
-                .FirstOrDefault();
-            if (lastSellPortals is not null)
-                gift.PortalsGift!.ActivityLastSell = new ActivityLastSell
-                {
-                    Price = lastSellPortals.Price,
-                    Time = lastSellPortals.CreatedAt
-                };
         }
         else if (gift.Type == SignalType.PortalsPortals)
         {
@@ -612,21 +554,6 @@ public class Parser : IAsyncDisposable
             {
                 // ignored
             }
-
-            // activity max price
-            gift.PortalsGift!.ActivityMaxPrice = gift.PortalsGift?.ActivityHistory3Days?
-                .OrderByDescending(x => x.Price)
-                .FirstOrDefault()?.Price;
-            // activity last price
-            var lastSell = gift.PortalsGift?.ActivityHistory3Days?
-                .OrderByDescending(x => x.CreatedAt)
-                .FirstOrDefault();
-            if (lastSell is not null)
-                gift.PortalsGift!.ActivityLastSell = new ActivityLastSell
-                {
-                    Price = lastSell.Price,
-                    Time = lastSell.CreatedAt
-                };
         }
 
         await _telegramBot.SendSignal(gift, criteria);
@@ -792,7 +719,7 @@ public class Parser : IAsyncDisposable
                         filter = "{\"price\":{\"$exists\":true},\"buyer\":{\"$exists\":false},\"asset\":\"TON\"}",
                         @ref = 0,
                         price_range = (object?)null,
-                        user_auth = TelegramRepository.TonnelRelayerDecodedTgWebAppData
+                        user_auth = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData
                     });
             if (response == null || response.Length == 0) throw new Exception("Не удалось получить данные о подарках.");
             foreach (var tonnelRelayerGiftInfo in response)
