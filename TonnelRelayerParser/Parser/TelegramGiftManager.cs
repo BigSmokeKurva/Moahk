@@ -14,6 +14,9 @@ public static class TelegramGiftManager
     {
         var response = await Client.GetStringAsync($"https://t.me/nft/{giftId}");
         using var document = await Parser.ParseDocumentAsync(response);
+        var collectionElement =
+            document.QuerySelector(".tgme_gift_preview > svg:nth-child(1) > g:nth-child(2) > text:nth-child(3)");
+        var collection = collectionElement?.TextContent.Trim();
         var modelElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(2) > td:nth-child(2)");
         var model = modelElement?.TextContent[..modelElement.TextContent.LastIndexOf(' ')];
         var modelPercentage = modelElement?.QuerySelector("mark")?.TextContent;
@@ -28,20 +31,22 @@ public static class TelegramGiftManager
         var quantityElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(5) > td:nth-child(2)");
         var quantityText = quantityElement?.TextContent;
         var quantityParts = quantityText?.Split(['/', ' '], StringSplitOptions.RemoveEmptyEntries);
-        var isSoldElement = document.QuerySelector(".footer");
+        var signatureElement = document.QuerySelector(".footer");
         if (model is null || modelPercentage is null || backdrop is null ||
             backdropPercentage is null || symbol is null || symbolPercentage is null ||
-            quantityParts is null) throw new Exception($"Не удалось получить информацию о подарке {giftId}");
+            quantityParts is null ||
+            collection is null) throw new Exception($"Не удалось получить информацию о подарке {giftId}");
 
         return new TelegramGiftInfo
         {
+            Collection = collection,
             Model = (model, double.Parse(modelPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
             Backdrop = (backdrop,
                 double.Parse(backdropPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
             Symbol = (symbol, double.Parse(symbolPercentage[..^1].Replace(',', '.'), CultureInfo.InvariantCulture)),
             Quantity = (int.Parse(new string(quantityParts[0].Where(char.IsDigit).ToArray())),
                 int.Parse(new string(quantityParts[1].Where(char.IsDigit).ToArray()))),
-            IsSold = isSoldElement is not null,
+            Signature = signatureElement is not null,
             Id = giftId
         };
     }

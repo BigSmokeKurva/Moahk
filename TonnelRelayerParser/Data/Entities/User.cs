@@ -23,8 +23,9 @@ public class User
     public double ModelPercentMax { get; set; } = 100;
     public List<SignalType> SignalTypes { get; set; } = Enum.GetValues<SignalType>().ToList();
     public List<Activity> Activities { get; set; } = Enum.GetValues<Activity>().ToList();
-    public List<GiftSaleStatus> GiftSaleStatuses { get; set; } = Enum.GetValues<GiftSaleStatus>().ToList();
+    public List<GiftSignatureStatus> GiftSignatureStatus { get; set; } = Enum.GetValues<GiftSignatureStatus>().ToList();
     public MessageType MessageType { get; set; } = MessageType.Full;
+    public Percentile Percentile { get; set; } = Percentile.None;
 
     #endregion
 }

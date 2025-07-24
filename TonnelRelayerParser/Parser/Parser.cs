@@ -12,6 +12,7 @@ namespace Moahk.Parser;
 public class SecondFloorGift
 {
     public required TelegramGiftInfo TelegramGiftInfo { get; init; }
+    public GiftBubblesDataGift? GiftBubblesDataGift { get; init; }
     public required double Price { get; init; }
     public required string BotUrl { get; init; }
 }
@@ -31,6 +32,7 @@ public abstract class GiftBase
     public double? Percentile75 { get; set; }
     public Action[]? ActivityHistory3Days { get; init; }
     public Action[]? ActivityHistoryAll { get; init; }
+    public GiftBubblesDataGift? BubblesDataGift { get; init; }
 }
 
 public class TonnelGift : GiftBase
@@ -148,7 +150,8 @@ public class Parser : IAsyncDisposable
             {
                 TelegramGiftInfo = secondFloorTelegramGiftInfo,
                 Price = secondFloorPrice,
-                BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={searchGifts[1].GiftId}"
+                BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={searchGifts[1].GiftId}",
+                GiftBubblesDataGift = GiftBubbleRepository.GetGiftData(secondFloorTelegramGiftInfo.Collection)
             };
         }
 
@@ -175,7 +178,8 @@ public class Parser : IAsyncDisposable
             BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={minPriceGift.GiftId}",
             SiteUrl = $"https://market.tonnel.network/?giftDrawerId={minPriceGift.GiftId}",
             TelegramGiftInfo = telegramGiftInfo,
-            SecondFloorGift = secondFloorGift
+            SecondFloorGift = secondFloorGift,
+            BubblesDataGift = GiftBubbleRepository.GetGiftData(telegramGiftInfo.Collection)
         };
     }
 
@@ -215,7 +219,8 @@ public class Parser : IAsyncDisposable
             {
                 TelegramGiftInfo = secondFloorTelegramGiftInfo,
                 Price = secondFloorPrice,
-                BotUrl = $"https://t.me/portals/market?startapp=gift_{searchGifts.Results[1].Id}"
+                BotUrl = $"https://t.me/portals/market?startapp=gift_{searchGifts.Results[1].Id}",
+                GiftBubblesDataGift = GiftBubbleRepository.GetGiftData(secondFloorTelegramGiftInfo.Collection)
             };
         }
 
@@ -241,7 +246,8 @@ public class Parser : IAsyncDisposable
             TelegramGiftId = telegramGiftId,
             BotUrl = $"https://t.me/portals/market?startapp=gift_{minPriceGift.Id}",
             TelegramGiftInfo = telegramGiftInfo,
-            SecondFloorGift = secondFloorGift
+            SecondFloorGift = secondFloorGift,
+            BubblesDataGift = GiftBubbleRepository.GetGiftData(telegramGiftInfo.Collection)
         };
     }
 

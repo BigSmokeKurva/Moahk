@@ -524,6 +524,14 @@ public class TelegramBot : IDisposable
             case "message_type_compact":
                 await MessageTypeSetCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
+            case "percentile":
+                await PercentileCallbackQuery(callbackQuery, dbContext, user.user);
+                break;
+            case "percentile_25":
+            case "percentile_75":
+            case "percentile_none":
+                await PercentileSetCallbackQuery(callbackQuery, dbContext, user.user);
+                break;
         }
 
         try
@@ -769,20 +777,20 @@ public class TelegramBot : IDisposable
     {
         return signalType switch
         {
-            SignalType.PortalsTonnel => "TONNEL → TONNEL",
+            SignalType.TonnelTonnel => "TONNEL → TONNEL",
             SignalType.TonnelPortals => "TONNEL → PORTALS",
             SignalType.PortalsPortals => "PORTALS → PORTALS",
-            SignalType.TonnelTonnel => "TONNEL → TONNEL",
+            SignalType.PortalsTonnel => "PORTALS → TONNEL",
             _ => throw new ArgumentOutOfRangeException(nameof(signalType), signalType, null)
         };
     }
 
-    private string GiftSaleStatusToString(GiftSaleStatus status)
+    private string GiftSaleStatusToString(GiftSignatureStatus status)
     {
         return status switch
         {
-            GiftSaleStatus.NeverSold => "Никогда не продавался",
-            GiftSaleStatus.SoldBefore => "Продавался ранее",
+            GiftSignatureStatus.Clean => "Чистый",
+            GiftSignatureStatus.Dirty => "Грязный",
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
         };
     }
@@ -798,17 +806,28 @@ public class TelegramBot : IDisposable
         };
     }
 
+    private string PercentileToString(Percentile percentile)
+    {
+        return percentile switch
+        {
+            Percentile.Percentile25 => "25-й процентиль",
+            Percentile.Percentile75 => "75-й процентиль",
+            Percentile.None => "Отключен",
+            _ => throw new ArgumentOutOfRangeException(nameof(percentile), percentile, null)
+        };
+    }
+
     private (InlineKeyboardMarkup keyboard, string msgText) GetFiltersMessage(Data.Entities.User user)
     {
         var buttons = new List<List<InlineKeyboardButton>>([
             [
                 InlineKeyboardButton.WithCallbackData("💰 Диапазон цен", "price_range"),
                 InlineKeyboardButton.WithCallbackData("📈 Выгода", "profit"),
-                InlineKeyboardButton.WithCallbackData("🎯 Оценка", "criteria")
+                InlineKeyboardButton.WithCallbackData("🔍 Оценка", "criteria")
             ],
             [
                 InlineKeyboardButton.WithCallbackData("🎯 Редкость", "model_percent"),
-                InlineKeyboardButton.WithCallbackData("🔢 Перцентилы", "percentiles")
+                InlineKeyboardButton.WithCallbackData("🔢 Процентель", "percentile")
             ],
             [
                 InlineKeyboardButton.WithCallbackData("🔗 Связки", "signal_types"),
@@ -824,10 +843,11 @@ public class TelegramBot : IDisposable
 
                        💰 Диапазон цен: {user.PriceMin.ToString("0.##", CultureInfo.InvariantCulture)} - {user.PriceMax.ToString("0.##", CultureInfo.InvariantCulture)} TON
                        📈 Минимальная выгода: {user.ProfitPercent.ToString("0.##", CultureInfo.InvariantCulture)}%
-                       🎯 Критерии оценки: {CriteriaToString(user.Criteria)}
+                       🔍 Оценка: {CriteriaToString(user.Criteria)}
                        🎯 Процент редкости: {user.ModelPercentMin.ToString("0.##", CultureInfo.InvariantCulture)}% - {user.ModelPercentMax.ToString("0.##", CultureInfo.InvariantCulture)}%
+                       🔢 Процентель: {PercentileToString(user.Percentile)}
                        🔗 Связки: {(user.SignalTypes.Count != 0 ? user.SignalTypes.Count == Enum.GetValues<SignalType>().Length ? "Любые" : string.Join(", ", user.SignalTypes.Select(SignalTypeToString)) : "Не выбраны")}
-                       ✒️ Подписи: {(user.GiftSaleStatuses.Count != 0 ? user.GiftSaleStatuses.Count == Enum.GetValues<GiftSaleStatus>().Length ? "Любые" : string.Join(", ", user.GiftSaleStatuses.Select(GiftSaleStatusToString)) : "Не выбраны")}
+                       ✒️ Подписи: {(user.GiftSignatureStatus.Count != 0 ? user.GiftSignatureStatus.Count == Enum.GetValues<GiftSignatureStatus>().Length ? "Любые" : string.Join(", ", user.GiftSignatureStatus.Select(GiftSaleStatusToString)) : "Не выбраны")}
                        🔥 Активность: {(user.Activities.Count != 0 ? user.Activities.Count == Enum.GetValues<Activity>().Length ? "Любая" : string.Join(", ", user.Activities.Select(ActivityToString)) : "Не выбрана")}
                        📜 Формат сообщений: {MessageTypeToString(user.MessageType)}
 
@@ -855,6 +875,56 @@ public class TelegramBot : IDisposable
         var (keyboard, msgText) = GetFiltersMessage(user);
         await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
             msgText, replyMarkup: keyboard);
+    }
+
+    private async Task PercentileCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (await CheckLicense(user))
+            return;
+        var buttons = new List<List<InlineKeyboardButton>>([
+            [
+                InlineKeyboardButton.WithCallbackData(PercentileToString(Percentile.Percentile25), "percentile_25"),
+                InlineKeyboardButton.WithCallbackData(PercentileToString(Percentile.Percentile75), "percentile_75")
+            ],
+            [
+                InlineKeyboardButton.WithCallbackData(PercentileToString(Percentile.None), "percentile_none")
+            ],
+            [
+                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
+            ]
+        ]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        var msgText = $"""
+                       📊 Процентель:
+
+                       Если цена подарка сравнивается с  25-м процентилем, это означает, что примерно 25% всех проданных за 3 дня подобных подарков имеют цену ниже или равную этой цене, а остальные 75% — дороже.
+
+                       Если цена подарка сравнивается с  75-м процентилем, значит, что 75% товаров проданных за 3 дня стоят ниже этой цены, и только 25% дороже.
+
+                       Текущий процентель: {PercentileToString(user.Percentile)}
+
+                       Выберите процентель, который вы хотите использовать:
+                       """;
+        await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
+            msgText, replyMarkup: keyboard);
+    }
+
+    private async Task PercentileSetCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
+        Data.Entities.User user)
+    {
+        if (await CheckLicense(user))
+            return;
+        var percentile = callbackQuery.Data switch
+        {
+            "percentile_25" => Percentile.Percentile25,
+            "percentile_75" => Percentile.Percentile75,
+            "percentile_none" => Percentile.None,
+            _ => throw new Exception("Неверный процентель.")
+        };
+        user.Percentile = percentile;
+        await dbContext.SaveChangesAsync();
+        await FiltersBackCallbackQuery(callbackQuery, dbContext, user);
     }
 
     private async Task MessageTypeCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -947,9 +1017,9 @@ public class TelegramBot : IDisposable
     {
         if (await CheckLicense(user))
             return;
-        var buttons = Enum.GetValues<GiftSaleStatus>().Select(x =>
+        var buttons = Enum.GetValues<GiftSignatureStatus>().Select(x =>
                 InlineKeyboardButton.WithCallbackData(
-                    (user.GiftSaleStatuses.Contains(x) ? "✅" : "❌") + ' ' + GiftSaleStatusToString(x),
+                    (user.GiftSignatureStatus.Contains(x) ? "✅" : "❌") + ' ' + GiftSaleStatusToString(x),
                     $"gift_sale_status_{x}"))
             .Chunk(2).Select(x => x.ToList()).ToList();
         buttons.Add([InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")]);
@@ -965,14 +1035,14 @@ public class TelegramBot : IDisposable
             return;
         var giftSaleStatusString = callbackQuery.Data?.Replace("gift_sale_status_", string.Empty);
         if (giftSaleStatusString is null ||
-            !Enum.TryParse<GiftSaleStatus>(giftSaleStatusString, out var giftSaleStatus))
+            !Enum.TryParse<GiftSignatureStatus>(giftSaleStatusString, out var giftSaleStatus))
         {
             await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Неверный статус продажи подарка.");
             return;
         }
 
-        if (!user.GiftSaleStatuses.Remove(giftSaleStatus)) user.GiftSaleStatuses.Add(giftSaleStatus);
-        user.GiftSaleStatuses = user.GiftSaleStatuses.OrderBy(x => x).ToList();
+        if (!user.GiftSignatureStatus.Remove(giftSaleStatus)) user.GiftSignatureStatus.Add(giftSaleStatus);
+        user.GiftSignatureStatus = user.GiftSignatureStatus.OrderBy(x => x).ToList();
         await dbContext.SaveChangesAsync();
         await GiftSaleStatusesCallbackQuery(callbackQuery, dbContext, user);
     }
@@ -1350,10 +1420,11 @@ public class TelegramBot : IDisposable
                        Фильтры:
                        💰 Диапазон цен: {user.PriceMin.ToString("0.##", CultureInfo.InvariantCulture)} - {user.PriceMax.ToString("0.##", CultureInfo.InvariantCulture)} TON
                        📈 Минимальная выгода: {user.ProfitPercent.ToString("0.##", CultureInfo.InvariantCulture)}%
-                       🎯 Критерии оценки: {CriteriaToString(user.Criteria)}
+                       🔍 Оценка: {CriteriaToString(user.Criteria)}
                        🎯 Процент редкости: {user.ModelPercentMin.ToString("0.##", CultureInfo.InvariantCulture)}% - {user.ModelPercentMax.ToString("0.##", CultureInfo.InvariantCulture)}%
+                       🔢 Процентель: {PercentileToString(user.Percentile)}
                        🔗 Связки: {(user.SignalTypes.Count != 0 ? user.SignalTypes.Count == Enum.GetValues<SignalType>().Length ? "Любые" : string.Join(", ", user.SignalTypes.Select(SignalTypeToString)) : "Не выбраны")}
-                       ✒️ Подписи: {(user.GiftSaleStatuses.Count != 0 ? user.GiftSaleStatuses.Count == Enum.GetValues<GiftSaleStatus>().Length ? "Любые" : string.Join(", ", user.GiftSaleStatuses.Select(GiftSaleStatusToString)) : "Не выбраны")}
+                       ✒️ Подписи: {(user.GiftSignatureStatus.Count != 0 ? user.GiftSignatureStatus.Count == Enum.GetValues<GiftSignatureStatus>().Length ? "Любые" : string.Join(", ", user.GiftSignatureStatus.Select(GiftSaleStatusToString)) : "Не выбраны")}
                        🔥 Активность: {(user.Activities.Count != 0 ? user.Activities.Count == Enum.GetValues<Activity>().Length ? "Любая" : string.Join(", ", user.Activities.Select(ActivityToString)) : "Не выбрана")}
                        📜 Формат сообщений: {MessageTypeToString(user.MessageType)}
                        """;
@@ -1382,55 +1453,85 @@ public class TelegramBot : IDisposable
         Data.Entities.User user)
     {
         var msgText = $"""
-                       🔍 Как работает бот?
-                       Бот постоянно сканирует маркетплейсы Tonnel и Portals, анализирует цены, активность продаж, находит и помечает "грязные" подарки ( подарки с подписью)  и находит самые выгодные  подарки .
+                       🔍 *Как работает бот?*
+                       Бот постоянно сканирует маркетплейсы Tonnel и Portals, анализирует цены, активность продаж, находит и помечает "грязные" подарки ( подарки с подписью)  и находит самые выгодные связки для арбитража.
+
+                       🔄 *TONNEL → PORTALS*
+                       Это направление арбитража предлагаемое ботом:
+
+                       - Подарок найден дешевле на *TONNEL*, а выгоднее продать бот предлагает — на *PORTALS*.
+
+                       💹 *Перспектива: +18.46% (+17.54% с комиссией)*
+                       Это потенциальная выгода при перепродаже:
+
+                       - *Первая цифра —* разница между найденным подарком на одном маркетплейсе и вторым (или на другом маркетплейсе).
+                           
+                       - *Вторая цифра (в скобках) —* та же разница, но уже с учётом комиссии между маркетами
+
+                       - ✅ *Чистый / Грязный —* есть ли подпись. Чистый = без подписи. С подписью обычно ценятся процентов на 20 ниже.
+                           
+                       - 💲 *Цена —* текущая цена подарка.
+                           
+                       - 🔥 *Активность —* насколько часто происходят сделки с этим типом подарка:
+                           
+                           - *Высокая —* 10+ продаж за 3 дня
+                               
+                           - *Средняя —* 5-10 продаж за 3 дня
+                               
+                           - *Низкая —* 0-5 продаж за 3 дня
+                             
+                       - 📉 *( 25% ) —* нижний уровень цен из истории (низкий квартиль).
+                           
+                       - 📈 *( 75% ) —* верхний уровень цен из истории (высокий квартиль).  
+
+                           Эти цифры помогают понять  диапазон цен по истории продаж за последние 3 дня.
+                           
+                       📆 *Изменения рынка за 1 и 7 дней:*
+
+                       Общее изменение рынка на этот подарок за указанную дату ( парсится из бота gift bubbles)
 
 
-                       📊 Критерии оценки выгоды
+                       📊 *История продаж*
+                        Показывает последние 10 сделок на обоих маркетах 
+                       Это важно: История помогает понять реальную рыночную цену подарка. 
 
-                       1 - Сравнение со вторым по дешевизне таким же подарком в продаже
+                       ⚙️ *Объяснение фильтров*
 
-                       2 - Сравнение со вторым по дешевизне таким же подарком в продаже без фона
+                       💰 *Диапазон цен:*
+                       Подарки, цена которых попадает в этот диапазон.
 
+                       📈 *Минимальная выгода:*
+                       Минимальный процент перспективы, чтобы бот показал подарок. Например, если стоит 10% — всё ниже бот отфильтрует.
 
-                       💰 Как рассчитывается выгода?
-                       -Перспектива показывает процентную разницу между первым флором и вторым флором на маркетах. 
-                       Проще говоря разницу в цене между самым дешевым подарком и вторым по дешевизне в продаже.
+                       🔍 *Оценка:*
+                       Выбираем - бот будет искать  подарки с учетом фона или без учета фона.
 
-                       ⏰ Как часто приходят уведомления?
-                       Уведомления приходят сразу при обнаружении подходящего предложения. 
+                       🎯 *Процент редкости:*
+                       Выбор окна процента редкости модели подарка. 
 
-                       🎁 Какие подарки ищет бот?
-                       Все виды Telegram подарков, доступных на маркетплейсах Tonnel и Portals.
+                       🔗 *Связки:*
+                       Можно фильтровать по конкретным направлениям : Portals - Tonnel | Tonnel - Portals | Portals - Portals | Tonnel - Tonnel  а так же выбирать один или несколько вариантов.
 
-                       🩻 Что означает каждая строка в выводе?
+                       ✒️ *Подписи:*
 
-                       Найдено на: TONNEL
-                       💲 Текущая цена: 15,60 TON
-                       💹 Перспектива: +50,00% (разница между 1 и 2м флором)
-                       ❌ Состояние: Грязный  (с подписью или без )
-                       🔥 Активность: Низкая (насколько часто торгуется подарок)
+                       - *Чистый —* без подписи
+                           
+                       - *Грязный —* с подписью, чаще всего менее ликвиден и ценится меньше в среднем на 20%
 
-                       --- АНАЛИЗ РЫНКА (В продаже) ---
-                       💰 Второй флор: 31,20 TON (второй самый дешевый подобный подарок)
-                       💰 Самый дешевый на PORTALS: 25,00 TON (Флор на соседнем маркете)
+                       🔥 *Активность:*
+                       Настройка фильтрации подарков по активности продаж за последние 3 дня.
 
-                       --- АНАЛИЗ ИСТОРИИ ---
-                       📉 Нижний уровень цен (25%): 11,99 TON ( 25ый процентиль из истории продаж)
-                       📈 Высокий уровень цен (75%): 11,99 TON ( 75ый процентиль из истории продаж)
-                       🚀 Максимальная цена (за 7д.): 11,99 TON ( максимальная цена проданного подарка за последние 7 дней)
+                       📜 *Формат сообщений:*
 
-                       Анализ истории высчитывается исходя из истории за 7 дней и может не отображать действительность из за быстрых изменений рынка
+                       - *Компактный —* кратко, емко и можно удобно сравнить глазами все характеристики.
+                           
+                       - *Подробный —* с полными пояснениями.
+                       \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
 
-                       Контакты для связи - https://t.me/retrowaiver
-
-                       {(user.License is not null && user.License > DateTimeOffset.UtcNow ? """
-                           Гайд - https://teletype.in/@retrowaiver/ConvyrGiftFlipper
-
-                           Приватка -  https://t.me/+CcNTT5q3T7U1ZTIy
-                           """ : string.Empty)}
+                       [Контакты для связи](https://t.me/retrowaiver){(user.License is not null && user.License > DateTimeOffset.UtcNow ? " | [Гайд](https://teletype.in/@retrowaiver/ConvyrGiftFlipper) | [Приватка](https://t.me/+CcNTT5q3T7U1ZTIy)" : string.Empty)} | [Канал](https://t.me/ConvyrTech)| [Чат](https://t.me/Convyr_chat) | [Youtube](https://www.youtube.com/@Convyr)
+                       \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
                        """;
-        await _botClient.SendMessage(msg.From!.Id, msgText);
+        await _botClient.SendMessage(msg.From!.Id, msgText, ParseMode.Markdown);
     }
 
     private async Task<(InlineKeyboardMarkup keyboard, string msgText)> GetStatusMessage(ApplicationDbContext dbContext,
@@ -1504,7 +1605,8 @@ public class TelegramBot : IDisposable
             SignalType.PortalsPortals or SignalType.PortalsTonnel => gift.PortalsGift,
             _ => throw new Exception("Unknown gift type.")
         })!;
-        var giftSaleStatus = baseGift.TelegramGiftInfo.IsSold ? GiftSaleStatus.SoldBefore : GiftSaleStatus.NeverSold;
+        var giftSaleStatus =
+            baseGift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
         var users = await dbContext.Users
             .AsNoTracking()
             .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
@@ -1513,9 +1615,11 @@ public class TelegramBot : IDisposable
                         x.ModelPercentMin <= baseGift.TelegramGiftInfo.Model.Item2 &&
                         x.ModelPercentMax >= baseGift.TelegramGiftInfo.Model.Item2 &&
                         x.SignalTypes.Contains((SignalType)gift.Type) &&
-                        x.GiftSaleStatuses.Contains(giftSaleStatus) &&
-                        x.Activities.Contains(baseGift.Activity)
-            )
+                        x.GiftSignatureStatus.Contains(giftSaleStatus) &&
+                        x.Activities.Contains(baseGift.Activity) &&
+                        (x.Percentile == Percentile.None
+                         || (x.Percentile == Percentile.Percentile25 && baseGift.Price <= baseGift.Percentile25)
+                         || (x.Percentile == Percentile.Percentile75 && baseGift.Price <= baseGift.Percentile75)))
             .OrderBy(x => Guid.NewGuid())
             .ToArrayAsync();
         if (users.Length == 0) return;
@@ -1578,18 +1682,22 @@ public class TelegramBot : IDisposable
                      [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
                      🔄 *{SignalTypeToString((SignalType)gift.Type)}*
 
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
+                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
 
                      --- TONNEL --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      --- [TONNEL (2 флор)]({gift.TonnelGift.SecondFloorGift!.BotUrl}) --- 
-                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+
+                     Изменения рынка:
+                     📆 1 день: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1610,22 +1718,26 @@ public class TelegramBot : IDisposable
                      [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
                      🔄 *{SignalTypeToString((SignalType)gift.Type)}*
 
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
-                     💹 *Перспектива с комиссией:* {(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}%
+                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
+                     💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
 
                      --- TONNEL --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      --- [PORTALS (2 флор)]({gift.PortalsGift!.BotUrl}) --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+
+                     Изменения рынка:
+                     📆 1 день: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1650,18 +1762,22 @@ public class TelegramBot : IDisposable
                      [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
                      🔄 *{SignalTypeToString((SignalType)gift.Type)}*
 
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
+                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
 
                      --- PORTALS --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      --- [PORTALS (2 флор)]({gift.PortalsGift.SecondFloorGift!.BotUrl}) --- 
-                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+
+                     Изменения рынка:
+                     📆 1 день: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1680,22 +1796,26 @@ public class TelegramBot : IDisposable
                      [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
                      🔄 *{SignalTypeToString((SignalType)gift.Type)}*
 
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
-                     💹 *Перспектива с комиссией:* {(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}%
+                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
+                     💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
 
                      --- PORTALS --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      --- [TONNEL (2 флор)]({gift.TonnelGift!.BotUrl}) --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
                      💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
                      🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
                      📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
                      📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+
+                     Изменения рынка:
+                     📆 1 день: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1731,13 +1851,18 @@ public class TelegramBot : IDisposable
                      💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
 
                      TONNEL
-                     {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 {gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.TonnelGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
 
                      [Второй флор]({gift.TonnelGift.SecondFloorGift!.BotUrl})
-                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                     {(gift.TonnelGift.BubblesDataGift is null ? string.Empty : $"""
 
+                          Изменения рынка:
+                          📆 1 день: {gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          📆 7 дней: {gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          """)}
                      {(table is null ? string.Empty : $"""
+
                                                        📊История продаж:
                                                        ```
                                                        {table}
@@ -1759,14 +1884,18 @@ public class TelegramBot : IDisposable
                      💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}% ({(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}% с комиссией)
 
                      TONNEL
-                     {(gift.TonnelGift.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 {gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.TonnelGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
 
                      [PORTALS (Второй флор)]({gift.PortalsGift!.BotUrl})
-                     {(gift.PortalsGift!.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 {gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.PortalsGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.PortalsGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
+                     {(gift.TonnelGift.BubblesDataGift is null ? string.Empty : $"""
 
+                          Изменения рынка:
+                          📆 1 день: {gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          📆 7 дней: {gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          """)}
                      {(table is null ? string.Empty : $"""
+
                                                        📊История продаж:
                                                        ```
                                                        {table}
@@ -1791,13 +1920,18 @@ public class TelegramBot : IDisposable
                      💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
 
                      PORTALS
-                     {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 {gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.PortalsGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
 
                      [Второй флор]({gift.PortalsGift.SecondFloorGift!.BotUrl})
-                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                     {(gift.PortalsGift.BubblesDataGift is null ? string.Empty : $"""
 
+                          Изменения рынка:
+                          📆 1 день: {gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          📆 7 дней: {gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          """)}
                      {(table is null ? string.Empty : $"""
+
                                                        📊История продаж:
                                                        ```
                                                        {table}
@@ -1816,14 +1950,18 @@ public class TelegramBot : IDisposable
                      💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}% ({(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}% с комиссией)
 
                      PORTALS
-                     {(gift.PortalsGift.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 {gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.PortalsGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
 
                      [TONNEL (Второй флор)]({gift.TonnelGift!.BotUrl})
-                     {(gift.TonnelGift!.TelegramGiftInfo.IsSold ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 {gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"} | 📈 {gift.TonnelGift.Percentile75?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-"}
+                     {(gift.TonnelGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
+                     {(gift.PortalsGift.BubblesDataGift is null ? string.Empty : $"""
 
+                          Изменения рынка:
+                          📆 1 день: {gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          📆 7 дней: {gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                          """)}
                      {(table is null ? string.Empty : $"""
+
                                                        📊История продаж:
                                                        ```
                                                        {table}
