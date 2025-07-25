@@ -1599,27 +1599,31 @@ public class TelegramBot : IDisposable
     public async Task SendSignal(Gift gift, Criteria criteria)
     {
         await using var dbContext = new ApplicationDbContext();
-        GiftBase baseGift = (gift.Type switch
+        (GiftBase gift, Activity secondFloorActivity) baseGift = (gift.Type switch
         {
-            SignalType.TonnelTonnel or SignalType.TonnelPortals => gift.TonnelGift,
-            SignalType.PortalsPortals or SignalType.PortalsTonnel => gift.PortalsGift,
+            SignalType.TonnelTonnel => (gift.TonnelGift, gift.TonnelGift!.Activity),
+            SignalType.TonnelPortals => (gift.TonnelGift, gift.PortalsGift!.Activity),
+            SignalType.PortalsTonnel => (gift.PortalsGift!, gift.TonnelGift!.Activity),
+            SignalType.PortalsPortals => (gift.PortalsGift!, gift.PortalsGift!.Activity),
             _ => throw new Exception("Unknown gift type.")
         })!;
         var giftSaleStatus =
-            baseGift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
+            baseGift.gift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
         var users = await dbContext.Users
             .AsNoTracking()
             .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
-                        x.PriceMin <= baseGift.Price && x.PriceMax >= baseGift.Price &&
+                        x.PriceMin <= baseGift.gift.Price && x.PriceMax >= baseGift.gift.Price &&
                         x.ProfitPercent <= gift.PercentDiff &&
-                        x.ModelPercentMin <= baseGift.TelegramGiftInfo.Model.Item2 &&
-                        x.ModelPercentMax >= baseGift.TelegramGiftInfo.Model.Item2 &&
+                        x.ModelPercentMin <= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
+                        x.ModelPercentMax >= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
                         x.SignalTypes.Contains((SignalType)gift.Type) &&
                         x.GiftSignatureStatus.Contains(giftSaleStatus) &&
-                        x.Activities.Contains(baseGift.Activity) &&
+                        x.Activities.Contains(baseGift.secondFloorActivity) &&
                         (x.Percentile == Percentile.None
-                         || (x.Percentile == Percentile.Percentile25 && baseGift.Price <= baseGift.Percentile25)
-                         || (x.Percentile == Percentile.Percentile75 && baseGift.Price <= baseGift.Percentile75)))
+                         || (x.Percentile == Percentile.Percentile25 &&
+                             baseGift.gift.Price <= baseGift.gift.Percentile25)
+                         || (x.Percentile == Percentile.Percentile75 &&
+                             baseGift.gift.Price <= baseGift.gift.Percentile75)))
             .OrderBy(x => Guid.NewGuid())
             .ToArrayAsync();
         if (users.Length == 0) return;
