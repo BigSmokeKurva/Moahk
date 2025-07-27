@@ -7,10 +7,10 @@ namespace Moahk.Parser;
 public class GiftBubbleRepository : IDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private static GiftBubblesDataGift[] _gifts = [];
-    private static readonly object _giftsLock = new();
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly HttpClient _client = new();
+    private readonly Lock _giftsLock = new();
+    private GiftBubblesDataGift[] _gifts = [];
 
     public void Dispose()
     {
@@ -51,7 +51,7 @@ public class GiftBubbleRepository : IDisposable
         }
     }
 
-    public static GiftBubblesDataGift? GetGiftData(string collection)
+    public GiftBubblesDataGift? GetGiftData(string collection)
     {
         lock (_giftsLock)
         {

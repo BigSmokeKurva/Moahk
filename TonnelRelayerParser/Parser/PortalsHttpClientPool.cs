@@ -10,9 +10,11 @@ public class PortalsHttpClientPool : IDisposable
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly MemoryCache _cache = new("PortalsHttpClientPool");
     private readonly (HttpClient Client, string Id)[] _httpClients;
+    private readonly TelegramAccountRepository _telegramAccountRepository;
 
-    public PortalsHttpClientPool()
+    public PortalsHttpClientPool(TelegramAccountRepository telegramAccountRepository)
     {
+        _telegramAccountRepository = telegramAccountRepository;
         string[][] headers =
         [
             ["accept", "application/json, text/plain, */*"],
@@ -117,7 +119,7 @@ public class PortalsHttpClientPool : IDisposable
                 var client = await GetHttpClient();
                 using var request = new HttpRequestMessage(method, url);
                 request.Headers.Authorization =
-                    new AuthenticationHeaderValue("tma", TelegramAccountRepository.PortalsDecodedTgWebAppData);
+                    new AuthenticationHeaderValue("tma", _telegramAccountRepository.PortalsDecodedTgWebAppData);
                 var response = await client.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {

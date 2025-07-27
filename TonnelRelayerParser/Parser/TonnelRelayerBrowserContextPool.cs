@@ -19,7 +19,7 @@ public class BrowserContextItem(
     public bool IsAvailable { get; set; } = isAvailable;
 }
 
-public class TonnelRelayerBrowserContextPool : IAsyncDisposable
+public class TonnelRelayerBrowserContextPool(TelegramAccountRepository telegramAccountRepository) : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -90,7 +90,7 @@ public class TonnelRelayerBrowserContextPool : IAsyncDisposable
             ]
         });
         var userAgent = ConfigurationManager.GetString("UserAgent");
-        while (TelegramAccountRepository.TonnelRelayerTgWebAppData is null && !StoppingToken.IsCancellationRequested)
+        while (telegramAccountRepository.TonnelRelayerTgWebAppData is null && !StoppingToken.IsCancellationRequested)
             await Task.Delay(200, StoppingToken);
         _browserContexts = await Task.WhenAll(proxies.Select(async (proxy, index) =>
         {

@@ -1700,8 +1700,8 @@ public class TelegramBot : IDisposable
                      💲 *Текущая цена:* {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
 
                      Изменения рынка:
-                     📆 1 день: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1740,8 +1740,8 @@ public class TelegramBot : IDisposable
                      📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      Изменения рынка:
-                     📆 1 день: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.TonnelGift.BubblesDataGift is not null ? gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1780,8 +1780,8 @@ public class TelegramBot : IDisposable
                      💲 *Текущая цена:* {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
 
                      Изменения рынка:
-                     📆 1 день: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1818,8 +1818,8 @@ public class TelegramBot : IDisposable
                      📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
 
                      Изменения рынка:
-                     📆 1 день: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.PortalsGift.BubblesDataGift is not null ? gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
 
                      📊История продаж:
                      ```
@@ -1859,12 +1859,12 @@ public class TelegramBot : IDisposable
 
                      [Второй флор]({gift.TonnelGift.SecondFloorGift!.BotUrl})
                      {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     {(gift.TonnelGift.BubblesDataGift is null ? string.Empty : $"""
+                     {(gift.BubblesDataGift is null ? string.Empty : $"""
 
-                          Изменения рынка:
-                          📆 1 день: {gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          📆 7 дней: {gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          """)}
+                                                                      Изменения рынка:
+                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      """)}
                      {(table is null ? string.Empty : $"""
 
                                                        📊История продаж:
@@ -1892,12 +1892,12 @@ public class TelegramBot : IDisposable
 
                      [PORTALS (Второй флор)]({gift.PortalsGift!.BotUrl})
                      {(gift.PortalsGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-                     {(gift.TonnelGift.BubblesDataGift is null ? string.Empty : $"""
+                     {(gift.BubblesDataGift is null ? string.Empty : $"""
 
-                          Изменения рынка:
-                          📆 1 день: {gift.TonnelGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          📆 7 дней: {gift.TonnelGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          """)}
+                                                                      Изменения рынка:
+                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      """)}
                      {(table is null ? string.Empty : $"""
 
                                                        📊История продаж:
@@ -1928,12 +1928,12 @@ public class TelegramBot : IDisposable
 
                      [Второй флор]({gift.PortalsGift.SecondFloorGift!.BotUrl})
                      {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     {(gift.PortalsGift.BubblesDataGift is null ? string.Empty : $"""
+                     {(gift.BubblesDataGift is null ? string.Empty : $"""
 
-                          Изменения рынка:
-                          📆 1 день: {gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          📆 7 дней: {gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          """)}
+                                                                      Изменения рынка:
+                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      """)}
                      {(table is null ? string.Empty : $"""
 
                                                        📊История продаж:
@@ -1958,12 +1958,12 @@ public class TelegramBot : IDisposable
 
                      [TONNEL (Второй флор)]({gift.TonnelGift!.BotUrl})
                      {(gift.TonnelGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-                     {(gift.PortalsGift.BubblesDataGift is null ? string.Empty : $"""
+                     {(gift.BubblesDataGift is null ? string.Empty : $"""
 
-                          Изменения рынка:
-                          📆 1 день: {gift.PortalsGift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          📆 7 дней: {gift.PortalsGift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                          """)}
+                                                                      Изменения рынка:
+                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                      """)}
                      {(table is null ? string.Empty : $"""
 
                                                        📊История продаж:

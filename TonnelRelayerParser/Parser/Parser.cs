@@ -12,7 +12,6 @@ namespace Moahk.Parser;
 public class SecondFloorGift
 {
     public required TelegramGiftInfo TelegramGiftInfo { get; init; }
-    public GiftBubblesDataGift? GiftBubblesDataGift { get; init; }
     public required double Price { get; init; }
     public required string BotUrl { get; init; }
 }
@@ -32,7 +31,6 @@ public abstract class GiftBase
     public double? Percentile75 { get; set; }
     public Action[]? ActivityHistory3Days { get; init; }
     public Action[]? ActivityHistoryAll { get; init; }
-    public GiftBubblesDataGift? BubblesDataGift { get; init; }
 }
 
 public class TonnelGift : GiftBase
@@ -52,6 +50,7 @@ public class Action
 
 public class Gift
 {
+    public GiftBubblesDataGift? BubblesDataGift { get; init; }
     public SignalType? Type { get; set; }
     public double PercentDiff { get; set; }
     public double? PercentDiffWithCommission { get; set; }
@@ -80,20 +79,32 @@ public class Parser : IAsyncDisposable
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly MemoryCache _cache = new("TonnelRelayerParserCache");
     private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private readonly GiftBubbleRepository _giftBubble = new();
 
     private readonly Channel<GiftQueueItem> _giftQueue =
-        Channel.CreateBounded<GiftQueueItem>(1000);
+        Channel.CreateBounded<GiftQueueItem>(100);
 
-    private readonly PortalsHttpClientPool _portalsHttpClientPool = new();
-
-
+    private readonly PortalsHttpClientPool _portalsHttpClientPool;
     private readonly TelegramBot _telegramBot = new();
-    private readonly TonnelRelayerBrowserContextPool _tonnelRelayerBrowserContextPool = new();
+    private readonly TelegramGiftManager _telegramGiftManager = new();
+    private readonly TelegramAccountRepository _telegramRepository = new();
+    private readonly TonnelRelayerBrowserContextPool _tonnelRelayerBrowserContextPool;
+
+    public Parser()
+    {
+        _tonnelRelayerBrowserContextPool = new TonnelRelayerBrowserContextPool(_telegramRepository);
+        _portalsHttpClientPool = new PortalsHttpClientPool(_telegramRepository);
+        _giftBubble.Start();
+    }
 
     public async ValueTask DisposeAsync()
     {
-        await _tonnelRelayerBrowserContextPool.DisposeAsync();
         await _cancellationTokenSource.CancelAsync();
+        await _tonnelRelayerBrowserContextPool.DisposeAsync();
+        _portalsHttpClientPool.Dispose();
+        _telegramRepository.Dispose();
+        _giftBubble.Dispose();
+        _telegramGiftManager.Dispose();
         _cancellationTokenSource.Dispose();
         _telegramBot.Dispose();
         GC.SuppressFinalize(this);
@@ -101,12 +112,14 @@ public class Parser : IAsyncDisposable
 
     public async Task Start()
     {
+        await _telegramRepository.Start();
+        _giftBubble.Start();
         await _tonnelRelayerBrowserContextPool.Start();
         _ = RunTonnelGetMarketGiftsLoop();
         var activityThreads = new List<Task>();
         for (var i = 0; i < _tonnelRelayerBrowserContextPool.Size - 1; i++)
         {
-            var activityThread = TonnelActivityThread();
+            var activityThread = QueueThread();
             activityThreads.Add(activityThread);
         }
 
@@ -144,20 +157,19 @@ public class Parser : IAsyncDisposable
         var price = CalculateTonnelPriceWithCommission((double)minPriceGift!.Price!);
         var telegramGiftId = string.Concat(minPriceGift.Name?.Where(char.IsLetter) ?? string.Empty)
                              + '-' + minPriceGift.GiftNum;
-        var telegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(telegramGiftId);
+        var telegramGiftInfo = await _telegramGiftManager.GetGiftInfoAsync(telegramGiftId);
         SecondFloorGift? secondFloorGift = null;
         if (searchGifts.Length >= 2)
         {
             var secondFloorPrice = CalculateTonnelPriceWithCommission((double)searchGifts[1].Price!);
             var secondFloorTelegramGiftId = string.Concat(searchGifts[1].Name?.Where(char.IsLetter) ?? string.Empty)
                                             + '-' + searchGifts[1].GiftNum;
-            var secondFloorTelegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(secondFloorTelegramGiftId);
+            var secondFloorTelegramGiftInfo = await _telegramGiftManager.GetGiftInfoAsync(secondFloorTelegramGiftId);
             secondFloorGift = new SecondFloorGift
             {
                 TelegramGiftInfo = secondFloorTelegramGiftInfo,
                 Price = secondFloorPrice,
-                BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={searchGifts[1].GiftId}",
-                GiftBubblesDataGift = GiftBubbleRepository.GetGiftData(secondFloorTelegramGiftInfo.Collection)
+                BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={searchGifts[1].GiftId}"
             };
         }
 
@@ -184,8 +196,7 @@ public class Parser : IAsyncDisposable
             BotUrl = $"https://t.me/tonnel_network_bot/gift?startapp={minPriceGift.GiftId}",
             SiteUrl = $"https://market.tonnel.network/?giftDrawerId={minPriceGift.GiftId}",
             TelegramGiftInfo = telegramGiftInfo,
-            SecondFloorGift = secondFloorGift,
-            BubblesDataGift = GiftBubbleRepository.GetGiftData(telegramGiftInfo.Collection)
+            SecondFloorGift = secondFloorGift
         };
     }
 
@@ -212,7 +223,7 @@ public class Parser : IAsyncDisposable
         var price = double.Parse(minPriceGift.Price!, CultureInfo.InvariantCulture);
         var telegramGiftId = string.Concat(minPriceGift.Name?.Where(char.IsLetter) ?? string.Empty)
                              + '-' + minPriceGift.ExternalCollectionNumber;
-        var telegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(telegramGiftId);
+        var telegramGiftInfo = await _telegramGiftManager.GetGiftInfoAsync(telegramGiftId);
         SecondFloorGift? secondFloorGift = null;
         if (searchGifts.Results.Length >= 2)
         {
@@ -220,13 +231,12 @@ public class Parser : IAsyncDisposable
             var secondFloorTelegramGiftId =
                 string.Concat(searchGifts.Results[1].Name?.Where(char.IsLetter) ?? string.Empty)
                 + '-' + searchGifts.Results[1].ExternalCollectionNumber;
-            var secondFloorTelegramGiftInfo = await TelegramGiftManager.GetGiftInfoAsync(secondFloorTelegramGiftId);
+            var secondFloorTelegramGiftInfo = await _telegramGiftManager.GetGiftInfoAsync(secondFloorTelegramGiftId);
             secondFloorGift = new SecondFloorGift
             {
                 TelegramGiftInfo = secondFloorTelegramGiftInfo,
                 Price = secondFloorPrice,
-                BotUrl = $"https://t.me/portals/market?startapp=gift_{searchGifts.Results[1].Id}",
-                GiftBubblesDataGift = GiftBubbleRepository.GetGiftData(secondFloorTelegramGiftInfo.Collection)
+                BotUrl = $"https://t.me/portals/market?startapp=gift_{searchGifts.Results[1].Id}"
             };
         }
 
@@ -252,8 +262,7 @@ public class Parser : IAsyncDisposable
             TelegramGiftId = telegramGiftId,
             BotUrl = $"https://t.me/portals/market?startapp=gift_{minPriceGift.Id}",
             TelegramGiftInfo = telegramGiftInfo,
-            SecondFloorGift = secondFloorGift,
-            BubblesDataGift = GiftBubbleRepository.GetGiftData(telegramGiftInfo.Collection)
+            SecondFloorGift = secondFloorGift
         };
     }
 
@@ -267,7 +276,7 @@ public class Parser : IAsyncDisposable
         };
     }
 
-    private async Task TonnelActivityThread()
+    private async Task QueueThread()
     {
         while (!_cancellationTokenSource.IsCancellationRequested)
         {
@@ -280,16 +289,18 @@ public class Parser : IAsyncDisposable
                     continue;
                 }
 
-                _cache.Set(giftQueueItem.CacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(30));
+                _cache.Set(giftQueueItem.CacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
 
                 #region С фоном
 
                 var tonnelGift = await GetTonnelGift(giftQueueItem, true);
                 var portalsGift = await GetPortalsGift(giftQueueItem, true);
+                var bubblesDataGift = _giftBubble.GetGiftData(giftQueueItem.Name);
                 var gift = new Gift
                 {
                     TonnelGift = tonnelGift,
-                    PortalsGift = portalsGift
+                    PortalsGift = portalsGift,
+                    BubblesDataGift = bubblesDataGift
                 };
                 await MathSecondFloor(gift, Criteria.SecondFloor);
 
@@ -302,7 +313,8 @@ public class Parser : IAsyncDisposable
                 gift = new Gift
                 {
                     TonnelGift = tonnelGift,
-                    PortalsGift = portalsGift
+                    PortalsGift = portalsGift,
+                    BubblesDataGift = bubblesDataGift
                 };
                 await MathSecondFloor(gift, Criteria.SecondFloorWithoutBackdrop);
 
@@ -327,7 +339,7 @@ public class Parser : IAsyncDisposable
                         "https://gifts3.tonnel.network/api/saleHistory",
                         new
                         {
-                            authData = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData,
+                            authData = _telegramRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
                             type,
@@ -345,7 +357,7 @@ public class Parser : IAsyncDisposable
                         "https://gifts3.tonnel.network/api/saleHistory",
                         new
                         {
-                            authData = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData,
+                            authData = _telegramRepository.TonnelRelayerDecodedTgWebAppData,
                             page = 1,
                             limit = 50,
                             type,
@@ -390,7 +402,7 @@ public class Parser : IAsyncDisposable
                         @ref = 0,
                         price_range = (object?)null,
                         user_auth =
-                            TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData
+                            _telegramRepository.TonnelRelayerDecodedTgWebAppData
                     });
             return response;
         }
@@ -712,7 +724,7 @@ public class Parser : IAsyncDisposable
                         filter = "{\"price\":{\"$exists\":true},\"buyer\":{\"$exists\":false},\"asset\":\"TON\"}",
                         @ref = 0,
                         price_range = (object?)null,
-                        user_auth = TelegramAccountRepository.TonnelRelayerDecodedTgWebAppData
+                        user_auth = _telegramRepository.TonnelRelayerDecodedTgWebAppData
                     });
             if (response == null || response.Length == 0) throw new Exception("Не удалось получить данные о подарках.");
             foreach (var tonnelRelayerGiftInfo in response)

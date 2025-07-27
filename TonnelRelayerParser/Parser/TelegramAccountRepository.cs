@@ -8,14 +8,14 @@ namespace Moahk.Parser;
 public class TelegramAccountRepository : IDisposable
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
-    private static string? _tonnelRelayerTonnelRelayerTgWebAppData;
-    private static string? _portalsTgWebAppData;
-
-    private static string? _tonnelRelayerDecodedTgWebAppData;
-    private static string? _portalsDecodedTgWebAppData;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly Client _client;
+    private string? _portalsDecodedTgWebAppData;
+    private string? _portalsTgWebAppData;
+
+    private string? _tonnelRelayerDecodedTgWebAppData;
+
+    private string? _tonnelRelayerTonnelRelayerTgWebAppData;
 
 
     static TelegramAccountRepository()
@@ -28,7 +28,7 @@ public class TelegramAccountRepository : IDisposable
         _client = new Client(Config);
     }
 
-    public static string? TonnelRelayerTgWebAppData
+    public string? TonnelRelayerTgWebAppData
     {
         get => _tonnelRelayerTonnelRelayerTgWebAppData;
         private set
@@ -39,13 +39,13 @@ public class TelegramAccountRepository : IDisposable
         }
     }
 
-    public static string? TonnelRelayerDecodedTgWebAppData
+    public string? TonnelRelayerDecodedTgWebAppData
     {
         get => _tonnelRelayerDecodedTgWebAppData ?? throw new Exception("TgWebAppData is null.");
         private set => _tonnelRelayerDecodedTgWebAppData = value;
     }
 
-    public static string? PortalsTgWebAppData
+    public string? PortalsTgWebAppData
     {
         get => _portalsTgWebAppData;
         private set
@@ -56,7 +56,7 @@ public class TelegramAccountRepository : IDisposable
         }
     }
 
-    public static string? PortalsDecodedTgWebAppData
+    public string? PortalsDecodedTgWebAppData
     {
         get => _portalsDecodedTgWebAppData ?? throw new Exception("Portals TgWebAppData is null.");
         private set => _portalsDecodedTgWebAppData = value;
@@ -81,6 +81,8 @@ public class TelegramAccountRepository : IDisposable
             catch (Exception e)
             {
                 Logger.Error(e, "Ошибка при выполнении RequestAppWebView");
+                await Task.Delay(500, _cancellationTokenSource.Token);
+                continue;
             }
 
             await Task.Delay(TimeSpan.FromMinutes(10), _cancellationTokenSource.Token);

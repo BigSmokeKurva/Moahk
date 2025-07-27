@@ -4,16 +4,22 @@ using NLog;
 
 namespace Moahk.Parser;
 
-public static class TelegramGiftManager
+public class TelegramGiftManager : IDisposable
 {
-    private static readonly HttpClient Client = new();
-    private static readonly HtmlParser Parser = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+    private readonly HttpClient _client = new();
+    private readonly HtmlParser _parser = new();
 
-    public static async Task<TelegramGiftInfo> GetGiftInfoAsync(string giftId)
+    public void Dispose()
     {
-        var response = await Client.GetStringAsync($"https://t.me/nft/{giftId}");
-        using var document = await Parser.ParseDocumentAsync(response);
+        _client.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    public async Task<TelegramGiftInfo> GetGiftInfoAsync(string giftId)
+    {
+        var response = await _client.GetStringAsync($"https://t.me/nft/{giftId}");
+        using var document = await _parser.ParseDocumentAsync(response);
         var collectionElement =
             document.QuerySelector(".tgme_gift_preview > svg:nth-child(1) > g:nth-child(2) > text:nth-child(3)");
         var collection = collectionElement?.TextContent.Trim();
@@ -22,11 +28,9 @@ public static class TelegramGiftManager
         var modelPercentage = modelElement?.QuerySelector("mark")?.TextContent;
         var backdropElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(3) > td:nth-child(2)");
         var backdrop = backdropElement?.TextContent[..backdropElement.TextContent.LastIndexOf(' ')];
-        ;
         var backdropPercentage = backdropElement?.QuerySelector("mark")?.TextContent;
         var symbolElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)");
         var symbol = symbolElement?.TextContent[..symbolElement.TextContent.LastIndexOf(' ')];
-        ;
         var symbolPercentage = symbolElement?.QuerySelector("mark")?.TextContent;
         var quantityElement = document.QuerySelector(".table > tbody:nth-child(1) > tr:nth-child(5) > td:nth-child(2)");
         var quantityText = quantityElement?.TextContent;

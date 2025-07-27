@@ -1,5 +1,4 @@
 ﻿using Moahk.Data;
-using Moahk.Parser;
 using NLog;
 
 namespace Moahk;
@@ -17,10 +16,6 @@ internal static class Program
     {
         Microsoft.Playwright.Program.Main(["install", "chromium"]);
         await ApplicationDbContextInitialiser.InitialiseAsync();
-        using var telegramRepository = new TelegramAccountRepository();
-        await telegramRepository.Start();
-        using var giftBubble = new GiftBubbleRepository();
-        giftBubble.Start();
         await using var parser = new Parser.Parser();
         await parser.Start();
         await Task.Delay(Timeout.Infinite);
