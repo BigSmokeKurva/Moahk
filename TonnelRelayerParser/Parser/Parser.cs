@@ -59,6 +59,12 @@ public class Gift
     public PortalsGift? PortalsGift { get; init; }
 }
 
+public enum Market
+{
+    Tonnel,
+    Portals
+}
+
 internal record GiftQueueItem
 {
     public required string Name { get; init; }
@@ -405,164 +411,145 @@ public class Parser : IAsyncDisposable
         Gift gift,
         Criteria criteria)
     {
-        // tonnel-tonnel
-        if (gift.TonnelGift?.SecondFloorGift is not null)
-        {
-            var tonnelGift = gift.TonnelGift;
-            var secondFloorPrice = tonnelGift.SecondFloorGift.Price;
-            var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
-            gift.Type = SignalType.TonnelTonnel;
-            gift.PercentDiff = percentDiff;
-        }
+        // // tonnel-tonnel
+        // if (gift.TonnelGift?.SecondFloorGift is not null)
+        // {
+        //     var tonnelGift = gift.TonnelGift;
+        //     var secondFloorPrice = tonnelGift.SecondFloorGift.Price;
+        //     var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
+        //     gift.Type = SignalType.TonnelTonnel;
+        //     gift.PercentDiff = percentDiff;
+        // }
+        //
+        // // tonnel-portals
+        // if (gift.TonnelGift is not null && gift.PortalsGift is not null)
+        // {
+        //     var tonnelGift = gift.TonnelGift;
+        //     var portalsGift = gift.PortalsGift;
+        //     var secondFloorPrice = portalsGift.Price;
+        //     var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
+        //     var percentDiffWithCommission = MathPercentDiffWithCommission(tonnelGift.Price, secondFloorPrice);
+        //     if (gift.PercentDiff < percentDiff)
+        //     {
+        //         gift.Type = SignalType.TonnelPortals;
+        //         gift.PercentDiff = percentDiff;
+        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
+        //     }
+        // }
+        //
+        // // portals-portals
+        // if (gift.PortalsGift?.SecondFloorGift is not null)
+        // {
+        //     var portalsGift = gift.PortalsGift;
+        //     var secondFloorPrice = portalsGift.SecondFloorGift.Price;
+        //     var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
+        //     if (gift.PercentDiff < percentDiff)
+        //     {
+        //         gift.Type = SignalType.PortalsPortals;
+        //         gift.PercentDiff = percentDiff;
+        //     }
+        // }
+        //
+        // // portals-tonnel
+        // if (gift.PortalsGift is not null && gift.TonnelGift is not null)
+        // {
+        //     var portalsGift = gift.PortalsGift;
+        //     var tonnelGift = gift.TonnelGift;
+        //     var secondFloorPrice = tonnelGift.Price;
+        //     var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
+        //     var percentDiffWithCommission = MathPercentDiffWithCommission(portalsGift.Price, secondFloorPrice);
+        //     if (gift.PercentDiff < percentDiff)
+        //     {
+        //         gift.Type = SignalType.PortalsTonnel;
+        //         gift.PercentDiff = percentDiff;
+        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
+        //     }
+        // }
 
-        // tonnel-portals
-        if (gift.TonnelGift is not null && gift.PortalsGift is not null)
-        {
-            var tonnelGift = gift.TonnelGift;
-            var portalsGift = gift.PortalsGift;
-            var secondFloorPrice = portalsGift.Price;
-            var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
-            var percentDiffWithCommission = MathPercentDiffWithCommission(tonnelGift.Price, secondFloorPrice);
-            if (gift.PercentDiff < percentDiff)
-            {
-                gift.Type = SignalType.TonnelPortals;
-                gift.PercentDiff = percentDiff;
-                gift.PercentDiffWithCommission = percentDiffWithCommission;
-            }
-        }
+        // first sloor: ищем минимальную цену
+        (Market market, double? price)[] firstFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.Price),
+            (Market.Portals, gift.PortalsGift?.Price)
+        ];
+        var (firstFloorMarket, firstFloorPrice) = firstFloorOptions.OrderBy(x => x.price).FirstOrDefault();
+        if (firstFloorPrice is null)
+            return;
 
-        // portals-portals
-        if (gift.PortalsGift?.SecondFloorGift is not null)
-        {
-            var portalsGift = gift.PortalsGift;
-            var secondFloorPrice = portalsGift.SecondFloorGift.Price;
-            var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
-            if (gift.PercentDiff < percentDiff)
-            {
-                gift.Type = SignalType.PortalsPortals;
-                gift.PercentDiff = percentDiff;
-            }
-        }
+        // second floor: ищем максимальную цену среди возможных вариантов
+        (Market market, double? price, SignalType type)[] secondFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.SecondFloorGift?.Price, SignalType.TonnelTonnel),
+            (Market.Portals, gift.PortalsGift?.Price,
+                SignalType.TonnelPortals),
+            (Market.Portals, gift.PortalsGift?.SecondFloorGift?.Price, SignalType.PortalsPortals),
+            (Market.Tonnel, gift.TonnelGift?.Price,
+                SignalType.PortalsTonnel)
+        ];
 
-        // portals-tonnel
-        if (gift.PortalsGift is not null && gift.TonnelGift is not null)
-        {
-            var portalsGift = gift.PortalsGift;
-            var tonnelGift = gift.TonnelGift;
-            var secondFloorPrice = tonnelGift.Price;
-            var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
-            var percentDiffWithCommission = MathPercentDiffWithCommission(portalsGift.Price, secondFloorPrice);
-            if (gift.PercentDiff < percentDiff)
-            {
-                gift.Type = SignalType.PortalsTonnel;
-                gift.PercentDiff = percentDiff;
-                gift.PercentDiffWithCommission = percentDiffWithCommission;
-            }
-        }
+        var validSecondFloorOptions = secondFloorOptions
+            .Where(x => x.price is not null)
+            .Where(x =>
+                (firstFloorMarket == Market.Tonnel &&
+                 x.type is SignalType.TonnelTonnel or SignalType.TonnelPortals) ||
+                (firstFloorMarket == Market.Portals &&
+                 x.type is SignalType.PortalsPortals or SignalType.PortalsTonnel)
+            ).ToArray();
 
+        if (validSecondFloorOptions.Length == 0)
+            return;
+
+        var (_, secondFloorPrice, signalType) = validSecondFloorOptions
+            .OrderByDescending(x => x.price)
+            .FirstOrDefault();
+        if (secondFloorPrice is null)
+            return;
+
+        gift.Type = signalType;
         if (gift.Type is null)
             return;
-        if (gift.Type == SignalType.TonnelTonnel)
+        gift.PercentDiff = MathPercentDiff(firstFloorPrice.Value, secondFloorPrice.Value);
+        if (gift.PercentDiff < 0)
+            return;
+        switch (gift.Type)
         {
-            // percentile25
-            try
-            {
-                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory3Days?
-                    .Select(x => x.Price)
-                    .Percentile(25);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            // percentile75
-            try
-            {
-                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory3Days?
-                    .Select(x => x.Price)
-                    .Percentile(75);
-            }
-            catch
-            {
-                // ignored
-            }
-        }
-        else if (gift.Type is SignalType.TonnelPortals or SignalType.PortalsTonnel)
-        {
-            // tonnel
-            // percentile25
-            try
-            {
-                gift.TonnelGift!.Percentile25 = gift.TonnelGift.ActivityHistory3Days?
-                    .Select(x => x.Price)
-                    .Percentile(25);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            // percentile75
-            try
-            {
-                gift.TonnelGift!.Percentile75 = gift.TonnelGift.ActivityHistory3Days?
-                    .Select(x => x.Price)
-                    .Percentile(75);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            // percentile25
-            try
-            {
-                gift.PortalsGift!.Percentile25 =
-                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            // percentile75
-            try
-            {
-                gift.PortalsGift!.Percentile75 =
-                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
-            }
-            catch
-            {
-                // ignored
-            }
-        }
-        else if (gift.Type == SignalType.PortalsPortals)
-        {
-            // percentile25
-            try
-            {
-                gift.PortalsGift!.Percentile25 =
-                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            // percentile75
-            try
-            {
-                gift.PortalsGift!.Percentile75 =
-                    gift.PortalsGift?.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
-            }
-            catch
-            {
-                // ignored
-            }
+            case SignalType.TonnelTonnel:
+                TrySetPercentiles(gift.TonnelGift);
+                break;
+            case SignalType.TonnelPortals or SignalType.PortalsTonnel:
+                TrySetPercentiles(gift.TonnelGift);
+                TrySetPercentiles(gift.PortalsGift);
+                gift.PercentDiffWithCommission =
+                    MathPercentDiffWithCommission(firstFloorPrice.Value, secondFloorPrice.Value);
+                break;
+            case SignalType.PortalsPortals:
+                TrySetPercentiles(gift.PortalsGift);
+                break;
         }
 
         await _telegramBot.SendSignal(gift, criteria);
+    }
+
+    private void TrySetPercentiles(GiftBase? gift)
+    {
+        if (gift == null) return;
+        try
+        {
+            gift.Percentile25 = gift.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
+        }
+        catch
+        {
+            // ignored
+        }
+
+        try
+        {
+            gift.Percentile75 = gift.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
+        }
+        catch
+        {
+            // ignored
+        }
     }
 
     private double MathPercentDiff(double firstFloorPrice, double secondFloorPrice)
