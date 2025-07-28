@@ -1599,14 +1599,19 @@ public class TelegramBot : IDisposable
     public async Task SendSignal(Gift gift, Criteria criteria)
     {
         await using var dbContext = new ApplicationDbContext();
-        (GiftBase gift, Activity secondFloorActivity) baseGift = (gift.Type switch
-        {
-            SignalType.TonnelTonnel => (gift.TonnelGift, gift.TonnelGift!.Activity),
-            SignalType.TonnelPortals => (gift.TonnelGift, gift.PortalsGift!.Activity),
-            SignalType.PortalsTonnel => (gift.PortalsGift!, gift.TonnelGift!.Activity),
-            SignalType.PortalsPortals => (gift.PortalsGift!, gift.PortalsGift!.Activity),
-            _ => throw new Exception("Unknown gift type.")
-        })!;
+        (GiftBase gift, Activity secondFloorActivity, double? secondFloorPercentile75, double? secondFloorPercentile25)
+            baseGift = (gift.Type switch
+            {
+                SignalType.TonnelTonnel => (gift.TonnelGift, gift.TonnelGift!.Activity, gift.TonnelGift!.Percentile75,
+                    gift.TonnelGift!.Percentile25),
+                SignalType.TonnelPortals => (gift.TonnelGift, gift.PortalsGift!.Activity,
+                    gift.PortalsGift!.Percentile75, gift.PortalsGift!.Percentile25),
+                SignalType.PortalsTonnel => (gift.PortalsGift!, gift.TonnelGift!.Activity,
+                    gift.TonnelGift!.Percentile75, gift.TonnelGift!.Percentile25),
+                SignalType.PortalsPortals => (gift.PortalsGift!, gift.PortalsGift!.Activity,
+                    gift.PortalsGift!.Percentile75, gift.PortalsGift!.Percentile25),
+                _ => throw new Exception("Unknown gift type.")
+            })!;
         var giftSaleStatus =
             baseGift.gift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
         var users = await dbContext.Users
@@ -1621,9 +1626,9 @@ public class TelegramBot : IDisposable
                         x.Activities.Contains(baseGift.secondFloorActivity) &&
                         (x.Percentile == Percentile.None
                          || (x.Percentile == Percentile.Percentile25 &&
-                             baseGift.gift.Price <= baseGift.gift.Percentile25)
+                             baseGift.gift.Price <= baseGift.secondFloorPercentile25)
                          || (x.Percentile == Percentile.Percentile75 &&
-                             baseGift.gift.Price <= baseGift.gift.Percentile75)))
+                             baseGift.gift.Price <= baseGift.secondFloorPercentile75)))
             .OrderBy(x => Guid.NewGuid())
             .ToArrayAsync();
         if (users.Length == 0) return;

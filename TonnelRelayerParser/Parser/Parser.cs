@@ -294,7 +294,37 @@ public class Parser : IAsyncDisposable
                 #region С фоном
 
                 var tonnelGift = await GetTonnelGift(giftQueueItem, true);
+                if (tonnelGift is not null)
+                {
+                    var tonnelGiftCacheKey =
+                        $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(tonnelGiftCacheKey))
+                    {
+                        Logger.Info($"Подарок {tonnelGiftCacheKey} недавно был обработан, пропускаем.");
+                        tonnelGift = null;
+                    }
+                    else
+                    {
+                        _cache.Set(tonnelGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                    }
+                }
+
                 var portalsGift = await GetPortalsGift(giftQueueItem, true);
+                if (portalsGift is not null)
+                {
+                    var portalsGiftCacheKey =
+                        $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(portalsGiftCacheKey))
+                    {
+                        Logger.Info($"Подарок {portalsGiftCacheKey} недавно был обработан, пропускаем.");
+                        portalsGift = null;
+                    }
+                    else
+                    {
+                        _cache.Set(portalsGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                    }
+                }
+
                 var bubblesDataGift = _giftBubble.GetGiftData(giftQueueItem.Name);
                 var gift = new Gift
                 {
@@ -309,7 +339,37 @@ public class Parser : IAsyncDisposable
                 #region Без фона
 
                 tonnelGift = await GetTonnelGift(giftQueueItem, false);
+                if (tonnelGift is not null)
+                {
+                    var tonnelGiftCacheKey =
+                        $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(tonnelGiftCacheKey))
+                    {
+                        Logger.Info($"Подарок {tonnelGiftCacheKey} недавно был обработан, пропускаем.");
+                        tonnelGift = null;
+                    }
+                    else
+                    {
+                        _cache.Set(tonnelGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                    }
+                }
+
                 portalsGift = await GetPortalsGift(giftQueueItem, false);
+                if (portalsGift is not null)
+                {
+                    var portalsGiftCacheKey =
+                        $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(portalsGiftCacheKey))
+                    {
+                        Logger.Info($"Подарок {portalsGiftCacheKey} недавно был обработан, пропускаем.");
+                        portalsGift = null;
+                    }
+                    else
+                    {
+                        _cache.Set(portalsGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                    }
+                }
+
                 gift = new Gift
                 {
                     TonnelGift = tonnelGift,
@@ -675,7 +735,6 @@ public class Parser : IAsyncDisposable
                     continue;
                 try
                 {
-                    var cacheKey = $"portalsGiftInfo_{portalsSearchResult.Id}_{portalsSearchResult.Price}";
                     var name = portalsSearchResult.Name?.Trim();
                     var modelAttribute = portalsSearchResult.Attributes?.FirstOrDefault(x => x.Type == "model");
                     var model = modelAttribute?.Value?.Trim();
@@ -686,6 +745,7 @@ public class Parser : IAsyncDisposable
                     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(model) ||
                         string.IsNullOrWhiteSpace(backdrop))
                         continue;
+                    var cacheKey = $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
                     await _giftQueue.Writer.WriteAsync(
                         new GiftQueueItem
                         {
@@ -733,8 +793,8 @@ public class Parser : IAsyncDisposable
                     continue;
                 try
                 {
-                    var cacheKey =
-                        $"tonnelRelayerGiftInfo_{tonnelRelayerGiftInfo.GiftId}_{tonnelRelayerGiftInfo.Price}";
+                    // var cacheKey =
+                    //     $"tonnelRelayerGiftInfo_{tonnelRelayerGiftInfo.GiftId}_{tonnelRelayerGiftInfo.Price}";
                     var name = tonnelRelayerGiftInfo.Name?.Trim();
                     var modelRaw = tonnelRelayerGiftInfo.Model;
                     var backdropRaw = tonnelRelayerGiftInfo.Backdrop;
@@ -757,6 +817,8 @@ public class Parser : IAsyncDisposable
                         continue;
                     if (!double.TryParse(backdropPercentStr, CultureInfo.InvariantCulture, out var backdropPercent))
                         continue;
+                    var cacheKey =
+                        $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
                     await _giftQueue.Writer.WriteAsync(
                         new GiftQueueItem
                         {
