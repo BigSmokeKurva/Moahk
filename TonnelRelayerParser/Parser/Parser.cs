@@ -4,75 +4,12 @@ using System.Runtime.Caching;
 using System.Threading.Channels;
 using Moahk.Data.Enums;
 using Moahk.Other;
+using Moahk.Parser.Data;
 using Moahk.Parser.ResponseModels;
 using NLog;
+using Action = Moahk.Parser.Data.Action;
 
 namespace Moahk.Parser;
-
-public class SecondFloorGift
-{
-    public required TelegramGiftInfo TelegramGiftInfo { get; init; }
-    public required double Price { get; init; }
-    public required string BotUrl { get; init; }
-}
-
-public abstract class GiftBase
-{
-    public required string Name { get; init; }
-    public required string Model { get; init; }
-    public required string Backdrop { get; init; }
-    public required Activity Activity { get; init; }
-    public required double Price { get; init; }
-    public required string TelegramGiftId { get; init; }
-    public required string BotUrl { get; init; }
-    public required TelegramGiftInfo TelegramGiftInfo { get; init; }
-    public SecondFloorGift? SecondFloorGift { get; init; }
-    public double? Percentile25 { get; set; }
-    public double? Percentile75 { get; set; }
-    public Action[]? ActivityHistory3Days { get; init; }
-    public Action[]? ActivityHistoryAll { get; init; }
-}
-
-public class TonnelGift : GiftBase
-{
-    public required string SiteUrl { get; init; }
-}
-
-public class PortalsGift : GiftBase
-{
-}
-
-public class Action
-{
-    public required DateTimeOffset CreatedAt { get; init; }
-    public required double Price { get; init; }
-}
-
-public class Gift
-{
-    public GiftBubblesDataGift? BubblesDataGift { get; init; }
-    public SignalType? Type { get; set; }
-    public double PercentDiff { get; set; }
-    public double? PercentDiffWithCommission { get; set; }
-    public TonnelGift? TonnelGift { get; init; }
-    public PortalsGift? PortalsGift { get; init; }
-}
-
-public enum Market
-{
-    Tonnel,
-    Portals
-}
-
-internal record GiftQueueItem
-{
-    public required string Name { get; init; }
-    public required string Model { get; init; }
-    public required double ModelPercent { get; init; }
-    public required string Backdrop { get; init; }
-    public required double BackdropPercent { get; init; }
-    public required string CacheKey { get; init; }
-}
 
 public class Parser : IAsyncDisposable
 {
@@ -126,7 +63,7 @@ public class Parser : IAsyncDisposable
         _ = Task.WhenAll(activityThreads);
     }
 
-    private async Task<TonnelGift?> GetTonnelGift(GiftQueueItem giftQueueItem, bool searchBackdrop)
+    private async Task<TonnelGiftSecondFloor?> GetTonnelGift(GiftQueueItem giftQueueItem, bool searchBackdrop)
     {
         var searchGifts = await TonnelSearchGift(giftQueueItem.Name, giftQueueItem.Model, giftQueueItem.ModelPercent,
             giftQueueItem.Backdrop, giftQueueItem.BackdropPercent, searchBackdrop);
@@ -179,17 +116,17 @@ public class Parser : IAsyncDisposable
                 CreatedAt = (DateTimeOffset)x.Timestamp!,
                 Price = (double)x.Price!
             }).ToArray();
-        var actionHistory3days = activityHistoryAll?
-            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-3))
+        var actionHistory7days = activityHistoryAll?
+            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-7))
             .ToArray();
-        var activity = GetActivityFromHistory(actionHistory3days);
-        return new TonnelGift
+        var activity = GetActivityFromHistory(actionHistory7days);
+        return new TonnelGiftSecondFloor
         {
             Name = minPriceGift.Name!,
             Model = minPriceGift.Model!,
             Backdrop = minPriceGift.Backdrop!,
             ActivityHistoryAll = activityHistoryAll,
-            ActivityHistory3Days = actionHistory3days,
+            ActivityHistory7Days = actionHistory7days,
             Activity = activity,
             Price = price,
             TelegramGiftId = telegramGiftId,
@@ -200,7 +137,7 @@ public class Parser : IAsyncDisposable
         };
     }
 
-    private async Task<PortalsGift?> GetPortalsGift(GiftQueueItem giftQueueItem, bool searchBackdrop)
+    private async Task<PortalsGiftSecondFloor?> GetPortalsGift(GiftQueueItem giftQueueItem, bool searchBackdrop)
     {
         var searchGifts = await PortalsSearchGift(giftQueueItem.Name, giftQueueItem.Model, giftQueueItem.Backdrop,
             searchBackdrop);
@@ -246,17 +183,17 @@ public class Parser : IAsyncDisposable
                 CreatedAt = (DateTimeOffset)x.CreatedAt!,
                 Price = double.Parse(x.Amount!, CultureInfo.InvariantCulture)
             }).ToArray();
-        var actionHistory3days = activityHistoryAll?
-            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-3))
+        var actionHistory7days = activityHistoryAll?
+            .Where(x => x.CreatedAt >= DateTimeOffset.UtcNow.AddDays(-7))
             .ToArray();
-        var activity = GetActivityFromHistory(actionHistory3days);
-        return new PortalsGift
+        var activity = GetActivityFromHistory(actionHistory7days);
+        return new PortalsGiftSecondFloor
         {
             Name = minPriceGift.Name!,
             Model = minPriceGift.Attributes!.First(x => x.Type == "model").Value!,
             Backdrop = minPriceGift.Attributes!.First(x => x.Type == "backdrop").Value!,
             ActivityHistoryAll = activityHistoryAll,
-            ActivityHistory3Days = actionHistory3days,
+            ActivityHistory7Days = actionHistory7days,
             Activity = activity,
             Price = price,
             TelegramGiftId = telegramGiftId,
@@ -296,43 +233,50 @@ public class Parser : IAsyncDisposable
                 var tonnelGift = await GetTonnelGift(giftQueueItem, true);
                 if (tonnelGift is not null)
                 {
-                    var tonnelGiftCacheKey =
-                        $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
-                    if (_cache.Contains(tonnelGiftCacheKey))
+                    // var tonnelGiftCacheKey =
+                    //     $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(tonnelGift.TelegramGiftId))
                     {
-                        Logger.Info($"Подарок {tonnelGiftCacheKey} недавно был обработан, пропускаем.");
+                        Logger.Info($"Подарок {tonnelGift.TelegramGiftId} недавно был обработан, пропускаем.");
                         tonnelGift = null;
                     }
                     else
                     {
-                        _cache.Set(tonnelGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                        _cache.Set(tonnelGift.TelegramGiftId, 0, DateTimeOffset.UtcNow.AddMinutes(120));
                     }
                 }
 
                 var portalsGift = await GetPortalsGift(giftQueueItem, true);
                 if (portalsGift is not null)
                 {
-                    var portalsGiftCacheKey =
-                        $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
-                    if (_cache.Contains(portalsGiftCacheKey))
+                    // var portalsGiftCacheKey =
+                    //     $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(portalsGift.TelegramGiftId))
                     {
-                        Logger.Info($"Подарок {portalsGiftCacheKey} недавно был обработан, пропускаем.");
+                        Logger.Info($"Подарок {portalsGift.TelegramGiftId} недавно был обработан, пропускаем.");
                         portalsGift = null;
                     }
                     else
                     {
-                        _cache.Set(portalsGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                        _cache.Set(portalsGift.TelegramGiftId, 0, DateTimeOffset.UtcNow.AddMinutes(120));
                     }
                 }
 
                 var bubblesDataGift = _giftBubble.GetGiftData(giftQueueItem.Name);
-                var gift = new Gift
+                var giftSecondFloorCriterion = new GiftSecondFloorCriterion
                 {
                     TonnelGift = tonnelGift,
                     PortalsGift = portalsGift,
                     BubblesDataGift = bubblesDataGift
                 };
-                await MathSecondFloor(gift, Criteria.SecondFloor);
+                await MathSecondFloor(giftSecondFloorCriterion, Criterion.SecondFloor);
+                var giftPercentile25Criterion = new GiftPercentile25Criterion
+                {
+                    TonnelGift = tonnelGift,
+                    PortalsGift = portalsGift,
+                    BubblesDataGift = bubblesDataGift
+                };
+                await MathArithmeticMeanThree(giftPercentile25Criterion);
 
                 #endregion
 
@@ -341,42 +285,49 @@ public class Parser : IAsyncDisposable
                 tonnelGift = await GetTonnelGift(giftQueueItem, false);
                 if (tonnelGift is not null)
                 {
-                    var tonnelGiftCacheKey =
-                        $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
-                    if (_cache.Contains(tonnelGiftCacheKey))
+                    // var tonnelGiftCacheKey =
+                    //     $"{tonnelGift.TelegramGiftInfo.Collection}_{tonnelGift.TelegramGiftInfo.Model.Item1}_{tonnelGift.TelegramGiftInfo.Model.Item2}_{tonnelGift.TelegramGiftInfo.Backdrop.Item1}_{tonnelGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(tonnelGift.TelegramGiftId))
                     {
-                        Logger.Info($"Подарок {tonnelGiftCacheKey} недавно был обработан, пропускаем.");
+                        Logger.Info($"Подарок {tonnelGift.TelegramGiftId} недавно был обработан, пропускаем.");
                         tonnelGift = null;
                     }
                     else
                     {
-                        _cache.Set(tonnelGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                        _cache.Set(tonnelGift.TelegramGiftId, 0, DateTimeOffset.UtcNow.AddMinutes(120));
                     }
                 }
 
                 portalsGift = await GetPortalsGift(giftQueueItem, false);
                 if (portalsGift is not null)
                 {
-                    var portalsGiftCacheKey =
-                        $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
-                    if (_cache.Contains(portalsGiftCacheKey))
+                    // var portalsGiftCacheKey =
+                    //     $"{portalsGift.TelegramGiftInfo.Collection}_{portalsGift.TelegramGiftInfo.Model.Item1}_{portalsGift.TelegramGiftInfo.Model.Item2}_{portalsGift.TelegramGiftInfo.Backdrop.Item1}_{portalsGift.TelegramGiftInfo.Backdrop.Item2}";
+                    if (_cache.Contains(portalsGift.TelegramGiftId))
                     {
-                        Logger.Info($"Подарок {portalsGiftCacheKey} недавно был обработан, пропускаем.");
+                        Logger.Info($"Подарок {portalsGift.TelegramGiftId} недавно был обработан, пропускаем.");
                         portalsGift = null;
                     }
                     else
                     {
-                        _cache.Set(portalsGiftCacheKey, 0, DateTimeOffset.UtcNow.AddMinutes(120));
+                        _cache.Set(portalsGift.TelegramGiftId, 0, DateTimeOffset.UtcNow.AddMinutes(120));
                     }
                 }
 
-                gift = new Gift
+                giftSecondFloorCriterion = new GiftSecondFloorCriterion
                 {
                     TonnelGift = tonnelGift,
                     PortalsGift = portalsGift,
                     BubblesDataGift = bubblesDataGift
                 };
-                await MathSecondFloor(gift, Criteria.SecondFloorWithoutBackdrop);
+                await MathSecondFloor(giftSecondFloorCriterion, Criterion.SecondFloorWithoutBackdrop);
+                giftPercentile25Criterion = new GiftPercentile25Criterion
+                {
+                    TonnelGift = tonnelGift,
+                    PortalsGift = portalsGift,
+                    BubblesDataGift = bubblesDataGift
+                };
+                await MathPercentile25(giftPercentile25Criterion);
 
                 #endregion
             }
@@ -480,64 +431,9 @@ public class Parser : IAsyncDisposable
     }
 
     private async Task MathSecondFloor(
-        Gift gift,
-        Criteria criteria)
+        GiftSecondFloorCriterion gift,
+        Criterion criterion)
     {
-        // // tonnel-tonnel
-        // if (gift.TonnelGift?.SecondFloorGift is not null)
-        // {
-        //     var tonnelGift = gift.TonnelGift;
-        //     var secondFloorPrice = tonnelGift.SecondFloorGift.Price;
-        //     var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
-        //     gift.Type = SignalType.TonnelTonnel;
-        //     gift.PercentDiff = percentDiff;
-        // }
-        //
-        // // tonnel-portals
-        // if (gift.TonnelGift is not null && gift.PortalsGift is not null)
-        // {
-        //     var tonnelGift = gift.TonnelGift;
-        //     var portalsGift = gift.PortalsGift;
-        //     var secondFloorPrice = portalsGift.Price;
-        //     var percentDiff = MathPercentDiff(tonnelGift.Price, secondFloorPrice);
-        //     var percentDiffWithCommission = MathPercentDiffWithCommission(tonnelGift.Price, secondFloorPrice);
-        //     if (gift.PercentDiff < percentDiff)
-        //     {
-        //         gift.Type = SignalType.TonnelPortals;
-        //         gift.PercentDiff = percentDiff;
-        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
-        //     }
-        // }
-        //
-        // // portals-portals
-        // if (gift.PortalsGift?.SecondFloorGift is not null)
-        // {
-        //     var portalsGift = gift.PortalsGift;
-        //     var secondFloorPrice = portalsGift.SecondFloorGift.Price;
-        //     var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
-        //     if (gift.PercentDiff < percentDiff)
-        //     {
-        //         gift.Type = SignalType.PortalsPortals;
-        //         gift.PercentDiff = percentDiff;
-        //     }
-        // }
-        //
-        // // portals-tonnel
-        // if (gift.PortalsGift is not null && gift.TonnelGift is not null)
-        // {
-        //     var portalsGift = gift.PortalsGift;
-        //     var tonnelGift = gift.TonnelGift;
-        //     var secondFloorPrice = tonnelGift.Price;
-        //     var percentDiff = MathPercentDiff(portalsGift.Price, secondFloorPrice);
-        //     var percentDiffWithCommission = MathPercentDiffWithCommission(portalsGift.Price, secondFloorPrice);
-        //     if (gift.PercentDiff < percentDiff)
-        //     {
-        //         gift.Type = SignalType.PortalsTonnel;
-        //         gift.PercentDiff = percentDiff;
-        //         gift.PercentDiffWithCommission = percentDiffWithCommission;
-        //     }
-        // }
-
         // first sloor: ищем минимальную цену
         (Market market, double? price)[] firstFloorOptions =
         [
@@ -599,7 +495,259 @@ public class Parser : IAsyncDisposable
                 break;
         }
 
-        await _telegramBot.SendSignal(gift, criteria);
+        await _telegramBot.SendSignalSecondFloor(gift, criterion);
+    }
+
+    private async Task MathPercentile25(
+        GiftPercentile25Criterion gift)
+    {
+        // first sloor: ищем минимальную цену
+        (Market market, double? price)[] firstFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.Price),
+            (Market.Portals, gift.PortalsGift?.Price)
+        ];
+        var (firstFloorMarket, firstFloorPrice) = firstFloorOptions.OrderBy(x => x.price).FirstOrDefault();
+        if (firstFloorPrice is null)
+            return;
+
+        // second floor: ищем максимальную цену среди возможных вариантов
+        (Market market, double? price, SignalType type)[] secondFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.SecondFloorGift?.Price, SignalType.TonnelTonnel),
+            (Market.Portals, gift.PortalsGift?.Price,
+                SignalType.TonnelPortals),
+            (Market.Portals, gift.PortalsGift?.SecondFloorGift?.Price, SignalType.PortalsPortals),
+            (Market.Tonnel, gift.TonnelGift?.Price,
+                SignalType.PortalsTonnel)
+        ];
+
+        var validSecondFloorOptions = secondFloorOptions
+            .Where(x => x.price is not null)
+            .Where(x =>
+                (firstFloorMarket == Market.Tonnel &&
+                 x.type is SignalType.TonnelTonnel or SignalType.TonnelPortals) ||
+                (firstFloorMarket == Market.Portals &&
+                 x.type is SignalType.PortalsPortals or SignalType.PortalsTonnel)
+            ).ToArray();
+
+        if (validSecondFloorOptions.Length == 0)
+            return;
+
+        var (_, secondFloorPrice, secondFloorSignalType) = validSecondFloorOptions
+            .OrderByDescending(x => x.price)
+            .FirstOrDefault();
+        gift.SecondFloorMarket = secondFloorSignalType switch
+        {
+            SignalType.TonnelTonnel or SignalType.PortalsTonnel => Market.Tonnel,
+            SignalType.TonnelPortals or SignalType.PortalsPortals => Market.Portals,
+            _ => null
+        };
+        // if (secondFloorPrice is null)
+        //     return;
+        TrySetPercentiles(gift.TonnelGift);
+        TrySetPercentiles(gift.PortalsGift);
+        // tonnel tonnel
+        if (firstFloorMarket == Market.Tonnel && gift.TonnelGift?.Percentile25 is not null)
+        {
+            var percentDiff = MathPercentDiff((double)firstFloorPrice, (double)gift.TonnelGift.Percentile25);
+            if (percentDiff > gift.PercentDiff)
+            {
+                gift.PercentDiffWithCommission =
+                    MathPercentDiffWithCommission(firstFloorPrice.Value, (double)gift.TonnelGift.Percentile25);
+                gift.PercentDiff = percentDiff;
+                gift.Type = SignalType.TonnelTonnel;
+            }
+        }
+
+        // tonnel portals
+        if (firstFloorMarket == Market.Tonnel && gift.PortalsGift?.Percentile25 is not null)
+        {
+            var percentDiff = MathPercentDiff((double)firstFloorPrice, (double)gift.PortalsGift.Percentile25);
+            if (percentDiff > gift.PercentDiff)
+            {
+                gift.PercentDiffWithCommission =
+                    MathPercentDiffWithCommission(firstFloorPrice.Value, (double)gift.PortalsGift.Percentile25);
+                gift.PercentDiff = percentDiff;
+                gift.Type = SignalType.TonnelPortals;
+            }
+        }
+
+        // portals portals
+        if (firstFloorMarket == Market.Portals && gift.PortalsGift?.Percentile25 is not null)
+        {
+            var percentDiff = MathPercentDiff((double)firstFloorPrice, (double)gift.PortalsGift.Percentile25);
+            if (percentDiff > gift.PercentDiff)
+            {
+                gift.PercentDiffWithCommission =
+                    MathPercentDiffWithCommission(firstFloorPrice.Value, (double)gift.PortalsGift.Percentile25);
+                gift.PercentDiff = percentDiff;
+                gift.Type = SignalType.PortalsPortals;
+            }
+        }
+
+        // portals tonnel
+        if (firstFloorMarket == Market.Portals && gift.TonnelGift?.Percentile25 is not null)
+        {
+            var percentDiff = MathPercentDiff((double)firstFloorPrice, (double)gift.TonnelGift.Percentile25);
+            if (percentDiff > gift.PercentDiff)
+            {
+                gift.PercentDiffWithCommission =
+                    MathPercentDiffWithCommission(firstFloorPrice.Value, (double)gift.TonnelGift.Percentile25);
+                gift.PercentDiff = percentDiff;
+                gift.Type = SignalType.PortalsTonnel;
+            }
+        }
+
+        if (gift.PercentDiff < 0 || gift.Type is null)
+            return;
+
+
+        await _telegramBot.SendSignalPercentile25(gift);
+    }
+
+    private async Task MathArithmeticMeanThree(
+        GiftPercentile25Criterion gift)
+    {
+        // first sloor: ищем минимальную цену
+        (Market market, double? price)[] firstFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.Price),
+            (Market.Portals, gift.PortalsGift?.Price)
+        ];
+        var (firstFloorMarket, firstFloorPrice) = firstFloorOptions.OrderBy(x => x.price).FirstOrDefault();
+        if (firstFloorPrice is null)
+            return;
+
+        // second floor: ищем максимальную цену среди возможных вариантов
+        (Market market, double? price, SignalType type)[] secondFloorOptions =
+        [
+            (Market.Tonnel, gift.TonnelGift?.SecondFloorGift?.Price, SignalType.TonnelTonnel),
+            (Market.Portals, gift.PortalsGift?.Price,
+                SignalType.TonnelPortals),
+            (Market.Portals, gift.PortalsGift?.SecondFloorGift?.Price, SignalType.PortalsPortals),
+            (Market.Tonnel, gift.TonnelGift?.Price,
+                SignalType.PortalsTonnel)
+        ];
+
+        var validSecondFloorOptions = secondFloorOptions
+            .Where(x => x.price is not null)
+            .Where(x =>
+                (firstFloorMarket == Market.Tonnel &&
+                 x.type is SignalType.TonnelTonnel or SignalType.TonnelPortals) ||
+                (firstFloorMarket == Market.Portals &&
+                 x.type is SignalType.PortalsPortals or SignalType.PortalsTonnel)
+            ).ToArray();
+
+        if (validSecondFloorOptions.Length == 0)
+            return;
+
+        var (_, secondFloorPrice, secondFloorSignalType) = validSecondFloorOptions
+            .OrderByDescending(x => x.price)
+            .FirstOrDefault();
+        gift.SecondFloorMarket = secondFloorSignalType switch
+        {
+            SignalType.TonnelTonnel or SignalType.PortalsTonnel => Market.Tonnel,
+            SignalType.TonnelPortals or SignalType.PortalsPortals => Market.Portals,
+            _ => null
+        };
+        // if (secondFloorPrice is null)
+        //     return;
+        // tonnel tonnel
+        if (firstFloorMarket == Market.Tonnel && gift.TonnelGift?.ActivityHistoryAll is not null)
+        {
+            var lastThreeSales = gift.TonnelGift.ActivityHistoryAll
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(3)
+                .Select(x => x.Price)
+                .ToList();
+            if (lastThreeSales.Count >= 3)
+            {
+                var arithmeticMeanThree = lastThreeSales.Average();
+                var percentDiff = MathPercentDiff((double)firstFloorPrice, arithmeticMeanThree);
+                if (percentDiff > gift.PercentDiff)
+                {
+                    gift.PercentDiffWithCommission =
+                        MathPercentDiffWithCommission(firstFloorPrice.Value, arithmeticMeanThree);
+                    gift.PercentDiff = percentDiff;
+                    gift.Type = SignalType.TonnelTonnel;
+                }
+            }
+        }
+
+        // tonnel portals
+        if (firstFloorMarket == Market.Tonnel && gift.PortalsGift?.ActivityHistoryAll is not null)
+        {
+            var lastThreeSales = gift.PortalsGift.ActivityHistoryAll
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(3)
+                .Select(x => x.Price)
+                .ToList();
+            if (lastThreeSales.Count >= 3)
+            {
+                var arithmeticMeanThree = lastThreeSales.Average();
+                var percentDiff = MathPercentDiff((double)firstFloorPrice, arithmeticMeanThree);
+                if (percentDiff > gift.PercentDiff)
+                {
+                    gift.PercentDiffWithCommission =
+                        MathPercentDiffWithCommission(firstFloorPrice.Value, arithmeticMeanThree);
+                    gift.PercentDiff = percentDiff;
+                    gift.Type = SignalType.TonnelPortals;
+                }
+            }
+        }
+
+        // portals portals
+        if (firstFloorMarket == Market.Portals && gift.PortalsGift?.ActivityHistoryAll is not null)
+        {
+            var lastThreeSales = gift.PortalsGift.ActivityHistoryAll
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(3)
+                .Select(x => x.Price)
+                .ToList();
+            if (lastThreeSales.Count >= 3)
+            {
+                var arithmeticMeanThree = lastThreeSales.Average();
+                var percentDiff = MathPercentDiff((double)firstFloorPrice, arithmeticMeanThree);
+                if (percentDiff > gift.PercentDiff)
+                {
+                    gift.PercentDiffWithCommission =
+                        MathPercentDiffWithCommission(firstFloorPrice.Value, arithmeticMeanThree);
+                    gift.PercentDiff = percentDiff;
+                    gift.Type = SignalType.PortalsPortals;
+                }
+            }
+        }
+
+        // portals tonnel
+        if (firstFloorMarket == Market.Portals && gift.TonnelGift?.ActivityHistoryAll is not null)
+        {
+            var lastThreeSales = gift.TonnelGift.ActivityHistoryAll
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(3)
+                .Select(x => x.Price)
+                .ToList();
+            if (lastThreeSales.Count >= 3)
+            {
+                var arithmeticMeanThree = lastThreeSales.Average();
+                var percentDiff = MathPercentDiff((double)firstFloorPrice, arithmeticMeanThree);
+                if (percentDiff > gift.PercentDiff)
+                {
+                    gift.PercentDiffWithCommission =
+                        MathPercentDiffWithCommission(firstFloorPrice.Value, arithmeticMeanThree);
+                    gift.PercentDiff = percentDiff;
+                    gift.Type = SignalType.PortalsTonnel;
+                }
+            }
+        }
+
+        if (gift.PercentDiff < 0 || gift.Type is null)
+            return;
+
+        TrySetPercentiles(gift.TonnelGift);
+        TrySetPercentiles(gift.PortalsGift);
+
+        await _telegramBot.SendSignalArithmeticMeanThree(gift);
     }
 
     private void TrySetPercentiles(GiftBase? gift)
@@ -607,7 +755,7 @@ public class Parser : IAsyncDisposable
         if (gift == null) return;
         try
         {
-            gift.Percentile25 = gift.ActivityHistory3Days?.Select(x => x.Price).Percentile(25);
+            gift.Percentile25 = gift.ActivityHistory7Days?.Select(x => x.Price).Percentile(25);
         }
         catch
         {
@@ -616,7 +764,7 @@ public class Parser : IAsyncDisposable
 
         try
         {
-            gift.Percentile75 = gift.ActivityHistory3Days?.Select(x => x.Price).Percentile(75);
+            gift.Percentile75 = gift.ActivityHistory7Days?.Select(x => x.Price).Percentile(75);
         }
         catch
         {
@@ -626,13 +774,13 @@ public class Parser : IAsyncDisposable
 
     private double MathPercentDiff(double firstFloorPrice, double secondFloorPrice)
     {
-        return (secondFloorPrice - firstFloorPrice) / secondFloorPrice * 100.0;
+        return (secondFloorPrice - firstFloorPrice) / firstFloorPrice * 100.0;
     }
 
     private double MathPercentDiffWithCommission(double firstFloorPrice, double secondFloorPrice)
     {
         const double fixedTonCommission = 0.36;
-        return (secondFloorPrice - firstFloorPrice - fixedTonCommission) / secondFloorPrice * 100.0;
+        return (secondFloorPrice - firstFloorPrice - fixedTonCommission) / firstFloorPrice * 100.0;
     }
 
     private async Task<PortalsSearchResponse?> PortalsSearchGift(string collection, string model, string backdrop,
@@ -745,7 +893,9 @@ public class Parser : IAsyncDisposable
                     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(model) ||
                         string.IsNullOrWhiteSpace(backdrop))
                         continue;
-                    var cacheKey = $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
+                    // var cacheKey = $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
+                    var telegramGiftId = string.Concat(portalsSearchResult.Name?.Where(char.IsLetter) ?? string.Empty)
+                                         + '-' + portalsSearchResult.ExternalCollectionNumber;
                     await _giftQueue.Writer.WriteAsync(
                         new GiftQueueItem
                         {
@@ -754,7 +904,7 @@ public class Parser : IAsyncDisposable
                             ModelPercent = (double)modelPercent!,
                             Backdrop = backdrop,
                             BackdropPercent = (double)backdropPercent!,
-                            CacheKey = cacheKey
+                            CacheKey = "queue_" + telegramGiftId
                         }, _cancellationTokenSource.Token);
                 }
                 catch (Exception e)
@@ -817,8 +967,10 @@ public class Parser : IAsyncDisposable
                         continue;
                     if (!double.TryParse(backdropPercentStr, CultureInfo.InvariantCulture, out var backdropPercent))
                         continue;
-                    var cacheKey =
-                        $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
+                    // var cacheKey =
+                    //     $"{name}_{model}_{modelPercent}_{backdrop}_{backdropPercent}";
+                    var telegramGiftId = string.Concat(tonnelRelayerGiftInfo.Name?.Where(char.IsLetter) ?? string.Empty)
+                                         + '-' + tonnelRelayerGiftInfo.GiftNum;
                     await _giftQueue.Writer.WriteAsync(
                         new GiftQueueItem
                         {
@@ -827,7 +979,7 @@ public class Parser : IAsyncDisposable
                             ModelPercent = modelPercent,
                             Backdrop = backdrop,
                             BackdropPercent = backdropPercent,
-                            CacheKey = cacheKey
+                            CacheKey = "queue_" + telegramGiftId
                         }, _cancellationTokenSource.Token);
                 }
                 catch (Exception e)

@@ -1,4 +1,4 @@
-﻿namespace Moahk.Parser;
+﻿namespace Moahk.Parser.Data;
 
 public struct TelegramGiftInfo
 {

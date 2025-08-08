@@ -23,7 +23,6 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.PriceMax).HasDefaultValue(10000);
             entity.Property(x => x.ProfitPercent).HasDefaultValue(10);
-            entity.Property(x => x.Criteria).HasDefaultValue(Criteria.SecondFloor);
             entity.Property(x => x.Status).HasDefaultValue(Status.None);
             entity.Property(x => x.ReferralPercent).HasDefaultValue(25);
             entity.Property(x => x.ModelPercentMax).HasDefaultValue(100);

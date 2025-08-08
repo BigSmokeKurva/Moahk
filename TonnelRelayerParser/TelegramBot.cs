@@ -5,14 +5,14 @@ using Microsoft.EntityFrameworkCore;
 using Moahk.Data;
 using Moahk.Data.Entities;
 using Moahk.Data.Enums;
-using Moahk.Parser;
+using Moahk.Parser.Data;
 using Moahk.Parser.ResponseModels;
 using NLog;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
-using Gift = Moahk.Parser.Gift;
+using Action = Moahk.Parser.Data.Action;
 using MessageType = Moahk.Data.Enums.MessageType;
 using User = Telegram.Bot.Types.User;
 
@@ -475,8 +475,7 @@ public class TelegramBot : IDisposable
             case "criteria":
                 await CriteriaCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
-            case "criteria_second_floor":
-            case "criteria_second_floor_without_backdrop":
+            case { } data when data.StartsWith("criteria_"):
                 await CriteriaSetCallbackQuery(callbackQuery, dbContext, user.user);
                 break;
             case "model_percent":
@@ -762,15 +761,42 @@ public class TelegramBot : IDisposable
         return true;
     }
 
-    private string CriteriaToString(Criteria criteria)
+    private string CriterionToString(Criterion criterion)
     {
-        return criteria switch
+        return criterion switch
         {
-            Criteria.SecondFloor => "Сравнение со вторым по дешевизне таким же подарком в продаже",
-            Criteria.SecondFloorWithoutBackdrop =>
+            Criterion.SecondFloor => "Сравнение со вторым по дешевизне таким же подарком в продаже",
+            Criterion.SecondFloorWithoutBackdrop =>
                 "Сравнение со вторым по дешевизне таким же подарком в продаже без фона",
+            Criterion.Percentile25WithoutBackdrop =>
+                "Сравнение цены найденного подарка с 25 процентилем из истории продаж без учета фона.",
+            Criterion.ArithmeticMeanThree =>
+                "Сравнение цены найденного подарка с средним значением цены за последние 3 продажи из активити вне зависимости от даты.",
             _ => string.Empty
         };
+    }
+
+    private string CriteriaToString(IEnumerable<Criterion> criteria)
+    {
+        return string.Join(", ", criteria.Select(CriterionToString));
+    }
+
+    private string CriterionToStringCompact(Criterion criterion)
+    {
+        // 2 флор 2 флор без фона 25-й процентиль среднее за 3 продажи
+        return criterion switch
+        {
+            Criterion.SecondFloor => "2 флор",
+            Criterion.SecondFloorWithoutBackdrop => "2 флор без фона",
+            Criterion.Percentile25WithoutBackdrop => "25-й процентиль",
+            Criterion.ArithmeticMeanThree => "среднее за 3 продажи",
+            _ => throw new ArgumentOutOfRangeException(nameof(criterion), criterion, null)
+        };
+    }
+
+    private string CriteriaToStringCompact(IEnumerable<Criterion> criteria)
+    {
+        return string.Join(", ", criteria.Select(CriterionToStringCompact));
     }
 
     private string SignalTypeToString(SignalType signalType)
@@ -843,7 +869,7 @@ public class TelegramBot : IDisposable
 
                        💰 Диапазон цен: {user.PriceMin.ToString("0.##", CultureInfo.InvariantCulture)} - {user.PriceMax.ToString("0.##", CultureInfo.InvariantCulture)} TON
                        📈 Минимальная выгода: {user.ProfitPercent.ToString("0.##", CultureInfo.InvariantCulture)}%
-                       🔍 Оценка: {CriteriaToString(user.Criteria)}
+                       🔍 Оценка: {CriteriaToStringCompact(user.Criteria)}
                        🎯 Процент редкости: {user.ModelPercentMin.ToString("0.##", CultureInfo.InvariantCulture)}% - {user.ModelPercentMax.ToString("0.##", CultureInfo.InvariantCulture)}%
                        🔢 Процентель: {PercentileToString(user.Percentile)}
                        🔗 Связки: {(user.SignalTypes.Count != 0 ? user.SignalTypes.Count == Enum.GetValues<SignalType>().Length ? "Любые" : string.Join(", ", user.SignalTypes.Select(SignalTypeToString)) : "Не выбраны")}
@@ -1283,27 +1309,46 @@ public class TelegramBot : IDisposable
     {
         if (await CheckLicense(user))
             return;
+        var buttons = Enum.GetValues<Criterion>().Select(x =>
+                InlineKeyboardButton.WithCallbackData(
+                    (user.Criteria.Contains(x) ? "✅" : "❌") + ' ' + CriterionToStringCompact(x), $"criteria_{x}"))
+            .Chunk(2).Select(x => x.ToList()).ToList();
+        buttons.Add([InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")]);
+        var keyboard = new InlineKeyboardMarkup(buttons);
+        // var keyboard = new InlineKeyboardMarkup([
+        //     [
+        //         InlineKeyboardButton.WithCallbackData(
+        //             $"{(user.Criteria.Contains(Criterion.SecondFloor) ? "✅" : "❌")} {CriterionToStringCompact(Criterion.SecondFloor)}",
+        //             "criteria_second_floor"),
+        //         InlineKeyboardButton.WithCallbackData(
+        //             $"{(user.Criteria.Contains(Criterion.SecondFloorWithoutBackdrop) ? "✅" : "❌")} {CriterionToStringCompact(Criterion.SecondFloorWithoutBackdrop)}",
+        //             "criteria_second_floor_without_backdrop"),
+        //     ],
+        //     [
+        //         InlineKeyboardButton.WithCallbackData(
+        //             $"{(user.Criteria.Contains(Criterion.Percentile25WithoutBackdrop) ? "✅" : "❌")} {CriterionToStringCompact(Criterion.Percentile25WithoutBackdrop)}",
+        //             "criteria_percentile_25_without_backdrop"),
+        //         InlineKeyboardButton.WithCallbackData(
+        //             $"{(user.Criteria.Contains(Criterion.ArithmeticMeanThree) ? "✅" : "❌")} {CriterionToStringCompact(Criterion.ArithmeticMeanThree)}",
+        //             "criteria_arithmetic_mean_three")
+        //     ],
+        //     [
+        //         InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
+        //     ]
+        // ]);
+        var msgText = """
+                      📊 Критерии оценки выгоды
 
-        var keyboard = new InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton.WithCallbackData("🔄 2 флор", "criteria_second_floor"),
-                InlineKeyboardButton.WithCallbackData("🔄 2 флор без фона", "criteria_second_floor_without_backdrop")
-            ],
-            [
-                InlineKeyboardButton.WithCallbackData("◀️ Назад к фильтрам", "filters_back")
-            ]
-        ]);
-        var msgText = $"""
-                       📊 Критерии оценки выгоды
+                      1 - Сравнение со вторым по дешевизне таким же подарком в продаже.
 
-                       1 - Сравнение со вторым по дешевизне таким же подарком в продаже
+                      2 - Сравнение со вторым по дешевизне таким же подарком в продаже без фона.
 
-                       2 - Сравнение со вторым по дешевизне таким же подарком в продаже без фона
+                      3 - Сравнение цены найденного подарка с 25 процентилем из истории продаж без учета фона.
 
-                       Текущий критерий: {CriteriaToString(user.Criteria)}
+                      4 - Сравнение цены найденного подарка с средним значением цены за последние 3 продажи из активити вне зависимости от даты. 
 
-                       Выберите метод расчёта перспективности:
-                       """;
+                      Выберите метод расчёта перспективности:
+                      """;
         // await _botClient.SendMessage(callbackQuery.From.Id, msgText, replyMarkup: keyboard);
         await _botClient.EditMessageText(callbackQuery.Message!.Chat.Id, callbackQuery.Message.Id,
             msgText, replyMarkup: keyboard);
@@ -1312,15 +1357,25 @@ public class TelegramBot : IDisposable
     private async Task CriteriaSetCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
         Data.Entities.User user)
     {
-        var criteria = callbackQuery.Data switch
+        var criterionString = callbackQuery.Data?.Replace("criteria_", string.Empty);
+        if (criterionString is null || !Enum.TryParse<Criterion>(criterionString, out var criterion))
         {
-            "criteria_second_floor" => Criteria.SecondFloor,
-            "criteria_second_floor_without_backdrop" => Criteria.SecondFloorWithoutBackdrop,
-            _ => user.Criteria
-        };
-        user.Criteria = criteria;
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Неверная активность.");
+            return;
+        }
+        // Criterion? criterion = callbackQuery.Data switch
+        // {
+        //     "criteria_second_floor" => Criterion.SecondFloor,
+        //     "criteria_second_floor_without_backdrop" => Criterion.SecondFloorWithoutBackdrop,
+        //     "criteria_percentile_25_without_backdrop" => Criterion.Percentile25WithoutBackdrop,
+        //     "criteria_arithmetic_mean_three" => Criterion.ArithmeticMeanThree,
+        //     _ => null
+        // };
+
+        if (!user.Criteria.Remove(criterion)) user.Criteria.Add(criterion);
+        user.Criteria = user.Criteria.OrderBy(x => x).ToList();
         await dbContext.SaveChangesAsync();
-        await FiltersBackCallbackQuery(callbackQuery, dbContext, user);
+        await CriteriaCallbackQuery(callbackQuery, dbContext, user);
     }
 
     private async Task PromoCodeInputCallbackQuery(CallbackQuery callbackQuery, ApplicationDbContext dbContext,
@@ -1420,7 +1475,7 @@ public class TelegramBot : IDisposable
                        Фильтры:
                        💰 Диапазон цен: {user.PriceMin.ToString("0.##", CultureInfo.InvariantCulture)} - {user.PriceMax.ToString("0.##", CultureInfo.InvariantCulture)} TON
                        📈 Минимальная выгода: {user.ProfitPercent.ToString("0.##", CultureInfo.InvariantCulture)}%
-                       🔍 Оценка: {CriteriaToString(user.Criteria)}
+                       🔍 Оценка: {CriteriaToStringCompact(user.Criteria)}
                        🎯 Процент редкости: {user.ModelPercentMin.ToString("0.##", CultureInfo.InvariantCulture)}% - {user.ModelPercentMax.ToString("0.##", CultureInfo.InvariantCulture)}%
                        🔢 Процентель: {PercentileToString(user.Percentile)}
                        🔗 Связки: {(user.SignalTypes.Count != 0 ? user.SignalTypes.Count == Enum.GetValues<SignalType>().Length ? "Любые" : string.Join(", ", user.SignalTypes.Select(SignalTypeToString)) : "Не выбраны")}
@@ -1596,7 +1651,67 @@ public class TelegramBot : IDisposable
 
     #region SendSignal
 
-    public async Task SendSignal(Gift gift, Criteria criteria)
+    private string BuildSignalTable(Action[]? tonnelActions, Action[]? portalsActions)
+    {
+        var tableBuilder = new StringBuilder();
+        tableBuilder.AppendLine("TONNEL           PORTALS");
+        tableBuilder.AppendLine("Цена   Дата      Цена   Дата");
+
+        for (var i = 0; i < 10; i++)
+        {
+            var tonnelAction = tonnelActions is not null &&
+                               tonnelActions.Length > i
+                ? tonnelActions[i]
+                : null;
+            var portalsAction = portalsActions is not null &&
+                                portalsActions.Length > i
+                ? portalsActions[i]
+                : null;
+
+            tableBuilder.AppendLine(
+                $"{(tonnelAction?.Price is { } price1 ? price1.ToString("0.##", CultureInfo.InvariantCulture) : "N/A"),-7}{(tonnelAction?.CreatedAt is { } date1 ? date1.ToString("dd.MM") : "N/A"),-10}{(portalsAction?.Price is { } price2 ? price2.ToString("0.##", CultureInfo.InvariantCulture) : "N/A"),-7}{(portalsAction?.CreatedAt is { } date2 ? date2.ToString("dd.MM") : "N/A"),-10}"
+            );
+        }
+
+        var table = tableBuilder.ToString();
+        return table;
+    }
+
+    private string? BuildCompactSignalTable(Action[]? tonnelActions, Action[]? portalsActions)
+    {
+        if ((tonnelActions is null &&
+             portalsActions is null) ||
+            (tonnelActions?.Length == 0 &&
+             portalsActions?.Length == 0))
+            return null;
+        var tableBuilder = new StringBuilder();
+        tableBuilder.AppendLine("TONNEL           PORTALS");
+        tableBuilder.AppendLine("Цена   Дата      Цена   Дата");
+
+        for (var i = 0; i < 10; i++)
+        {
+            var tonnelAction = tonnelActions is not null &&
+                               tonnelActions.Length > i
+                ? tonnelActions[i]
+                : null;
+            var portalsAction = portalsActions is not null &&
+                                portalsActions.Length > i
+                ? portalsActions[i]
+                : null;
+            if (tonnelAction is null && portalsAction is null)
+                break;
+            tableBuilder.AppendLine(
+                $"{(tonnelAction?.Price is { } price1 ? price1.ToString("0.##", CultureInfo.InvariantCulture) : "-"),-7}{(tonnelAction?.CreatedAt is { } date1 ? date1.ToString("dd.MM") : "-"),-10}{(portalsAction?.Price is { } price2 ? price2.ToString("0.##", CultureInfo.InvariantCulture) : "-"),-7}{(portalsAction?.CreatedAt is { } date2 ? date2.ToString("dd.MM") : "-"),-10}"
+            );
+        }
+
+        var table = tableBuilder.ToString();
+        return table;
+    }
+
+    #region SecondFloor
+
+    public async Task SendSignalSecondFloor(GiftSecondFloorCriterion gift, Criterion criterion)
     {
         await using var dbContext = new ApplicationDbContext();
         (GiftBase gift, Activity secondFloorActivity, double? secondFloorPercentile75, double? secondFloorPercentile25)
@@ -1616,7 +1731,7 @@ public class TelegramBot : IDisposable
             baseGift.gift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
         var users = await dbContext.Users
             .AsNoTracking()
-            .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria == criteria &&
+            .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow && x.Criteria.Contains(criterion) &&
                         x.PriceMin <= baseGift.gift.Price && x.PriceMax >= baseGift.gift.Price &&
                         x.ProfitPercent <= gift.PercentDiff &&
                         x.ModelPercentMin <= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
@@ -1633,10 +1748,8 @@ public class TelegramBot : IDisposable
             .ToArrayAsync();
         if (users.Length == 0) return;
 
-        var table = BuildSignalTable(gift);
-        var (fullKeyboard, fullMessage) = BuildFullSignalMessage(gift, table);
-        var compactTable = BuildCompactSignalTable(gift);
-        var (compactKeyboard, compactMessage) = BuildCompactSignalMessage(gift, compactTable);
+        var (fullKeyboard, fullMessage) = BuildFullSignalMessageSecondFloor(gift, criterion);
+        var (compactKeyboard, compactMessage) = BuildCompactSignalMessageSecondFloor(gift, criterion);
         foreach (var groupUsers in new[]
                  {
                      (users.Where(x => x.MessageType == MessageType.Full), MessageType.Full),
@@ -1669,374 +1782,741 @@ public class TelegramBot : IDisposable
         }
     }
 
-    private (InlineKeyboardMarkup keyboard, string message) BuildFullSignalMessage(Gift gift, string table)
+    private InlineKeyboardMarkup BuildKeyboardSecondFloor(GiftSecondFloorCriterion gift)
     {
-        switch (gift.Type)
+        return gift.Type switch
         {
-            case SignalType.TonnelTonnel:
-            {
-                return (new InlineKeyboardMarkup([
-                    gift.PortalsGift is not null
-                        ?
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
-                        ]
-                        :
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
-                        ],
-                    [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-
-                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-
-                     --- TONNEL --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     --- [TONNEL (2 флор)]({gift.TonnelGift.SecondFloorGift!.BotUrl}) --- 
-                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-
-                     Изменения рынка:
-                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-
-                     📊История продаж:
-                     ```
-                     {table}
-                     ```
-                     """);
-            }
-            case SignalType.TonnelPortals:
-            {
-                return (new InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
-                        ],
-                        [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
-                    ]),
-                    $"""
-                     [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-
-                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-                     💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-
-                     --- TONNEL --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     --- [PORTALS (2 флор)]({gift.PortalsGift!.BotUrl}) --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     Изменения рынка:
-                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-
-                     📊История продаж:
-                     ```
-                     {table}
-                     ```
-                     """);
-            }
-            case SignalType.PortalsPortals:
-            {
-                return (new InlineKeyboardMarkup([
-                    gift.TonnelGift is not null
-                        ?
-                        [
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
-                        ]
-                        :
-                        [
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
-                        ]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-
-                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-
-                     --- PORTALS --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     --- [PORTALS (2 флор)]({gift.PortalsGift.SecondFloorGift!.BotUrl}) --- 
-                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-
-                     Изменения рынка:
-                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-
-                     📊История продаж:
-                     ```
-                     {table}
-                     ```
-                     """);
-            }
-            case SignalType.PortalsTonnel:
-            {
-                return (new InlineKeyboardMarkup([
+            SignalType.TonnelTonnel => new InlineKeyboardMarkup([
+                gift.PortalsGift is not null
+                    ?
+                    [
+                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
+                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
+                    ]
+                    :
+                    [
+                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
+                    ],
+                [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
+            ]),
+            SignalType.TonnelPortals => new InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
+                    InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
+                ],
+                [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
+            ]),
+            SignalType.PortalsPortals => new InlineKeyboardMarkup([
+                gift.TonnelGift is not null
+                    ?
                     [
                         InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl),
-                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
+                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
                     ]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-
-                     💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-                     💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%
-
-                     --- PORTALS --- 
-                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.PortalsGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.PortalsGift.Percentile25 is not null ? $"{gift.PortalsGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.PortalsGift.Percentile75 is not null ? $"{gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     --- [TONNEL (2 флор)]({gift.TonnelGift!.BotUrl}) --- 
-                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
-                     💲 *Текущая цена:* {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     🔥 *Активность:* {ActivityToString(gift.TonnelGift.Activity)}
-                     📉 *Нижний уровень цен (25%):* {(gift.TonnelGift.Percentile25 is not null ? $"{gift.TonnelGift.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-                     📈 *Высокий уровень цен (75%):* {(gift.TonnelGift.Percentile75 is not null ? $"{gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
-
-                     Изменения рынка:
-                     📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-                     📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
-
-                     📊История продаж:
-                     ```
-                     {table}
-                     ```
-                     """);
-            }
-            default:
-                throw new ArgumentOutOfRangeException(nameof(gift.Type), gift.Type, "Unknown gift type.");
-        }
-    }
-
-    private (InlineKeyboardMarkup keyboard, string message) BuildCompactSignalMessage(Gift gift, string? table)
-    {
-        switch (gift.Type)
-        {
-            case SignalType.TonnelTonnel:
-                return (new InlineKeyboardMarkup([
-                    gift.PortalsGift is not null
-                        ?
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift.BotUrl)
-                        ]
-                        :
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
-                        ],
-                    [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
-
-                     TONNEL
-                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-
-                     [Второй флор]({gift.TonnelGift.SecondFloorGift!.BotUrl})
-                     {(gift.TonnelGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     {(gift.BubblesDataGift is null ? string.Empty : $"""
-
-                                                                      Изменения рынка:
-                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      """)}
-                     {(table is null ? string.Empty : $"""
-
-                                                       📊История продаж:
-                                                       ```
-                                                       {table}
-                                                       ```
-                                                       """)}
-                     """);
-
-            case SignalType.TonnelPortals:
-                return (new InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
-                        ],
-                        [InlineKeyboardButton.WithUrl("Сайт", gift.TonnelGift.SiteUrl)]
-                    ]),
-                    $"""
-                     [🎁](https://t.me/nft/{gift.TonnelGift!.TelegramGiftId}) *{gift.TonnelGift.Name} | {gift.TonnelGift.TelegramGiftInfo.Model.Item1} ({gift.TonnelGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.TonnelGift.TelegramGiftInfo.Backdrop.Item1} ({gift.TonnelGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}% ({(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}% с комиссией)
-
-                     TONNEL
-                     {(gift.TonnelGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-
-                     [PORTALS (Второй флор)]({gift.PortalsGift!.BotUrl})
-                     {(gift.PortalsGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-                     {(gift.BubblesDataGift is null ? string.Empty : $"""
-
-                                                                      Изменения рынка:
-                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      """)}
-                     {(table is null ? string.Empty : $"""
-
-                                                       📊История продаж:
-                                                       ```
-                                                       {table}
-                                                       ```
-                                                       """)}
-                     """);
-            case SignalType.PortalsPortals:
-                return (new InlineKeyboardMarkup([
-                    gift.TonnelGift is not null
-                        ?
-                        [
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl),
-                            InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift.BotUrl)
-                        ]
-                        :
-                        [
-                            InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
-                        ]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}%
-
-                     PORTALS
-                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-
-                     [Второй флор]({gift.PortalsGift.SecondFloorGift!.BotUrl})
-                     {(gift.PortalsGift.SecondFloorGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.SecondFloorGift!.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
-                     {(gift.BubblesDataGift is null ? string.Empty : $"""
-
-                                                                      Изменения рынка:
-                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      """)}
-                     {(table is null ? string.Empty : $"""
-
-                                                       📊История продаж:
-                                                       ```
-                                                       {table}
-                                                       ```
-                                                       """)}
-                     """);
-            case SignalType.PortalsTonnel:
-                return (new InlineKeyboardMarkup([
+                    :
                     [
-                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl),
-                        InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
+                        InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl)
                     ]
-                ]), $"""
-                     [🎁](https://t.me/nft/{gift.PortalsGift!.TelegramGiftId}) *{gift.PortalsGift.Name} | {gift.PortalsGift.TelegramGiftInfo.Model.Item1} ({gift.PortalsGift.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {gift.PortalsGift.TelegramGiftInfo.Backdrop.Item1} ({gift.PortalsGift.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*
-                     🔄 *{SignalTypeToString((SignalType)gift.Type)}*
-                     💹 *Перспектива:* +{gift.PercentDiff.ToString("0.##", CultureInfo.InvariantCulture)}% ({(gift.PercentDiffWithCommission > 0 ? $"+{gift.PercentDiffWithCommission.Value.ToString("0.##", CultureInfo.InvariantCulture)}" : $"{gift.PercentDiffWithCommission!.Value.ToString("0.##", CultureInfo.InvariantCulture)}")}% с комиссией)
-
-                     PORTALS
-                     {(gift.PortalsGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.PortalsGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.PortalsGift.Activity)}{(gift.PortalsGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.PortalsGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.PortalsGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.PortalsGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-
-                     [TONNEL (Второй флор)]({gift.TonnelGift!.BotUrl})
-                     {(gift.TonnelGift!.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {gift.TonnelGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(gift.TonnelGift.Activity)}{(gift.TonnelGift.Percentile25 is null ? string.Empty : "\n📉 " + gift.TonnelGift.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(gift.TonnelGift.Percentile75 is null ? string.Empty : " | 📈 " + gift.TonnelGift.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
-                     {(gift.BubblesDataGift is null ? string.Empty : $"""
-
-                                                                      Изменения рынка:
-                                                                      📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
-                                                                      """)}
-                     {(table is null ? string.Empty : $"""
-
-                                                       📊История продаж:
-                                                       ```
-                                                       {table}
-                                                       ```
-                                                       """)}
-                     """);
-            default:
-                throw new ArgumentOutOfRangeException(nameof(gift.Type), gift.Type, "Unknown gift type.");
-        }
+            ]),
+            SignalType.PortalsTonnel => new InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton.WithUrl("PORTALS", gift.PortalsGift!.BotUrl),
+                    InlineKeyboardButton.WithUrl("TONNEL", gift.TonnelGift!.BotUrl)
+                ]
+            ]),
+            _ => throw new ArgumentOutOfRangeException()
+        };
     }
 
-    private string BuildSignalTable(Gift gift)
+    private (InlineKeyboardMarkup keyboard, string message) BuildFullSignalMessageSecondFloor(
+        GiftSecondFloorCriterion gift, Criterion criterion)
     {
-        var tableBuilder = new StringBuilder();
-        tableBuilder.AppendLine("TONNEL           PORTALS");
-        tableBuilder.AppendLine("Цена   Дата      Цена   Дата");
-
-        for (var i = 0; i < 10; i++)
+        var table = BuildSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo, secondInfo) = gift.Type switch
         {
-            var tonnelAction = gift.TonnelGift?.ActivityHistoryAll is not null &&
-                               gift.TonnelGift.ActivityHistoryAll.Length > i
-                ? gift.TonnelGift.ActivityHistoryAll[i]
-                : null;
-            var portalsAction = gift.PortalsGift?.ActivityHistoryAll is not null &&
-                                gift.PortalsGift.ActivityHistoryAll.Length > i
-                ? gift.PortalsGift.ActivityHistoryAll[i]
-                : null;
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+                BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!, Market.Tonnel)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals, true)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals),
+                BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!, Market.Portals)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel, true)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
 
-            tableBuilder.AppendLine(
-                $"{(tonnelAction?.Price is { } price1 ? price1.ToString("0.##", CultureInfo.InvariantCulture) : "N/A"),-7}{(tonnelAction?.CreatedAt is { } date1 ? date1.ToString("dd.MM") : "N/A"),-10}{(portalsAction?.Price is { } price2 ? price2.ToString("0.##", CultureInfo.InvariantCulture) : "N/A"),-7}{(portalsAction?.CreatedAt is { } date2 ? date2.ToString("dd.MM") : "N/A"),-10}"
-            );
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $"\n💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%")}
+
+                           🔍 *Критерий:* {CriterionToStringCompact(criterion)}
+
+                           {firstInfo}
+
+                           {secondInfo}
+
+                           Изменения рынка:
+                           📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                           📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+
+                           📊История продаж:
+                           ```
+                           {table}
+                           ```
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
         }
 
-        var table = tableBuilder.ToString();
-        return table;
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    --- {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (2 флор)]({giftBase.BotUrl})")} --- 
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    🔥 *Активность:* {ActivityToString(giftBase.Activity)}
+                    📉 *Нижний уровень цен (25%):* {(giftBase.Percentile25 is not null ? $"{giftBase.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    📈 *Высокий уровень цен (75%):* {(giftBase.Percentile75 is not null ? $"{giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift, Market market)
+        {
+            return $"""
+                    --- [{market.ToString().ToUpper()} (2 флор)]({secondFloorGift.BotUrl}) --- 
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
     }
 
-    private string? BuildCompactSignalTable(Gift gift)
+    private (InlineKeyboardMarkup keyboard, string message) BuildCompactSignalMessageSecondFloor(
+        GiftSecondFloorCriterion gift, Criterion criterion)
     {
-        if ((gift.TonnelGift?.ActivityHistoryAll is null && gift.PortalsGift?.ActivityHistoryAll is null) ||
-            (gift.TonnelGift?.ActivityHistoryAll?.Length == 0 && gift.PortalsGift?.ActivityHistoryAll?.Length == 0))
-            return null;
-        var tableBuilder = new StringBuilder();
-        tableBuilder.AppendLine("TONNEL           PORTALS");
-        tableBuilder.AppendLine("Цена   Дата      Цена   Дата");
-
-        for (var i = 0; i < 10; i++)
+        var table = BuildCompactSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo, secondInfo) = gift.Type switch
         {
-            var tonnelAction = gift.TonnelGift?.ActivityHistoryAll is not null &&
-                               gift.TonnelGift.ActivityHistoryAll.Length > i
-                ? gift.TonnelGift.ActivityHistoryAll[i]
-                : null;
-            var portalsAction = gift.PortalsGift?.ActivityHistoryAll is not null &&
-                                gift.PortalsGift.ActivityHistoryAll.Length > i
-                ? gift.PortalsGift.ActivityHistoryAll[i]
-                : null;
-            if (tonnelAction is null && portalsAction is null)
-                break;
-            tableBuilder.AppendLine(
-                $"{(tonnelAction?.Price is { } price1 ? price1.ToString("0.##", CultureInfo.InvariantCulture) : "-"),-7}{(tonnelAction?.CreatedAt is { } date1 ? date1.ToString("dd.MM") : "-"),-10}{(portalsAction?.Price is { } price2 ? price2.ToString("0.##", CultureInfo.InvariantCulture) : "-"),-7}{(portalsAction?.CreatedAt is { } date2 ? date2.ToString("dd.MM") : "-"),-10}"
-            );
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+                BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals, true)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals),
+                BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel, true)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $" ({gift.PercentDiffWithCommission.Value.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}% с комиссией)")}
+                           🔍 *Критерий:* {CriterionToStringCompact(criterion)}
+
+                           {firstInfo}
+
+                           {secondInfo}
+
+                           {(gift.BubblesDataGift is null ? string.Empty : $"""
+
+                                                                            Изменения рынка:
+                                                                            📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            """)}
+                           {(table is null ? string.Empty : $"""
+
+                                                             📊История продаж:
+                                                             ```
+                                                             {table}
+                                                             ```
+                                                             """)}
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
         }
 
-        var table = tableBuilder.ToString();
-        return table;
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (Второй флор)]({giftBase.BotUrl})")}
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(giftBase.Activity)}{(giftBase.Percentile25 is null ? string.Empty : "\n📉 " + giftBase.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(giftBase.Percentile75 is null ? string.Empty : " | 📈 " + giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift)
+        {
+            return $"""
+                    [Второй флор]({secondFloorGift.BotUrl})
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
     }
+
+    #endregion
+
+    #region Percentile25
+
+    public async Task SendSignalPercentile25(GiftPercentile25Criterion gift)
+    {
+        await using var dbContext = new ApplicationDbContext();
+        (GiftBase gift, Activity secondFloorActivity, double? secondFloorPercentile75, double? secondFloorPercentile25)
+            baseGift = (gift.Type switch
+            {
+                SignalType.TonnelTonnel => (gift.TonnelGift, gift.TonnelGift!.Activity, gift.TonnelGift!.Percentile75,
+                    gift.TonnelGift!.Percentile25),
+                SignalType.TonnelPortals => (gift.TonnelGift, gift.PortalsGift!.Activity,
+                    gift.PortalsGift!.Percentile75, gift.PortalsGift!.Percentile25),
+                SignalType.PortalsTonnel => (gift.PortalsGift!, gift.TonnelGift!.Activity,
+                    gift.TonnelGift!.Percentile75, gift.TonnelGift!.Percentile25),
+                SignalType.PortalsPortals => (gift.PortalsGift!, gift.PortalsGift!.Activity,
+                    gift.PortalsGift!.Percentile75, gift.PortalsGift!.Percentile25),
+                _ => throw new Exception("Unknown gift type.")
+            })!;
+        var giftSaleStatus =
+            baseGift.gift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
+        var users = await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow &&
+                        x.Criteria.Contains(Criterion.Percentile25WithoutBackdrop) &&
+                        x.PriceMin <= baseGift.gift.Price && x.PriceMax >= baseGift.gift.Price &&
+                        x.ProfitPercent <= gift.PercentDiff &&
+                        x.ModelPercentMin <= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
+                        x.ModelPercentMax >= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
+                        x.SignalTypes.Contains((SignalType)gift.Type) &&
+                        x.GiftSignatureStatus.Contains(giftSaleStatus) &&
+                        x.Activities.Contains(baseGift.secondFloorActivity))
+            .OrderBy(x => Guid.NewGuid())
+            .ToArrayAsync();
+        if (users.Length == 0) return;
+
+        var (fullKeyboard, fullMessage) = BuildFullSignalMessagePercentile25(gift);
+        var (compactKeyboard, compactMessage) = BuildCompactSignalMessagePercentile25(gift);
+        foreach (var groupUsers in new[]
+                 {
+                     (users.Where(x => x.MessageType == MessageType.Full), MessageType.Full),
+                     (users.Where(x => x.MessageType == MessageType.Compact), MessageType.Compact)
+                 })
+        {
+            InlineKeyboardMarkup keyboard;
+            string message;
+            if (groupUsers.Item2 == MessageType.Full)
+            {
+                keyboard = fullKeyboard;
+                message = fullMessage;
+            }
+            else
+            {
+                keyboard = compactKeyboard;
+                message = compactMessage;
+            }
+
+            foreach (var user in groupUsers.Item1)
+                try
+                {
+                    await _botClient.SendMessage(user.Id, message, replyMarkup: keyboard,
+                        parseMode: ParseMode.Markdown);
+                }
+                catch
+                {
+                    // ignored
+                }
+        }
+    }
+
+    private (InlineKeyboardMarkup keyboard, string message) BuildFullSignalMessagePercentile25(
+        GiftPercentile25Criterion gift)
+    {
+        var table = BuildSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo) = gift.Type switch
+        {
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        var secondInfo = (gift.Type, gift.SecondFloorMarket) switch
+        {
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Tonnel)
+                when gift.TonnelGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!, Market.Tonnel),
+
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Portals)
+                when gift.PortalsGift is not null
+                => BuildGiftInfo(gift.PortalsGift!, Market.Portals, true),
+
+            (SignalType.PortalsPortals, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsPortals, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!, Market.Portals),
+
+            (SignalType.PortalsTonnel, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsTonnel, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!, Market.Portals),
+
+            _ => null
+        };
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
+
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $"\n💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%")}
+
+                           🔍 *Критерий:* {CriterionToStringCompact(Criterion.Percentile25WithoutBackdrop)}
+
+                           {firstInfo}{(secondInfo is null ? string.Empty : $"\n\n{secondInfo}")}
+
+                           Изменения рынка:
+                           📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                           📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+
+                           📊История продаж:
+                           ```
+                           {table}
+                           ```
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
+        }
+
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    --- {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (2 флор)]({giftBase.BotUrl})")} --- 
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    🔥 *Активность:* {ActivityToString(giftBase.Activity)}
+                    📉 *Нижний уровень цен (25%):* {(giftBase.Percentile25 is not null ? $"{giftBase.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    📈 *Высокий уровень цен (75%):* {(giftBase.Percentile75 is not null ? $"{giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift, Market market)
+        {
+            return $"""
+                    --- [{market.ToString().ToUpper()} (2 флор)]({secondFloorGift.BotUrl}) --- 
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
+    }
+
+    private (InlineKeyboardMarkup keyboard, string message) BuildCompactSignalMessagePercentile25(
+        GiftPercentile25Criterion gift)
+    {
+        var table = BuildCompactSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo) = gift.Type switch
+        {
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        var secondInfo = (gift.Type, gift.SecondFloorMarket) switch
+        {
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Tonnel)
+                when gift.TonnelGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!),
+
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Portals)
+                when gift.PortalsGift is not null
+                => BuildGiftInfo(gift.PortalsGift!, Market.Portals, true),
+
+            (SignalType.PortalsPortals, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsPortals, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!),
+
+            (SignalType.PortalsTonnel, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsTonnel, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!),
+
+            _ => null
+        };
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $" ({gift.PercentDiffWithCommission.Value.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}% с комиссией)")}
+                           🔍 *Критерий:* {CriterionToStringCompact(Criterion.Percentile25WithoutBackdrop)}
+
+                           {firstInfo}
+
+                           {secondInfo}
+
+                           {(gift.BubblesDataGift is null ? string.Empty : $"""
+
+                                                                            Изменения рынка:
+                                                                            📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            """)}
+                           {(table is null ? string.Empty : $"""
+
+                                                             📊История продаж:
+                                                             ```
+                                                             {table}
+                                                             ```
+                                                             """)}
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
+        }
+
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (Второй флор)]({giftBase.BotUrl})")}
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(giftBase.Activity)}{(giftBase.Percentile25 is null ? string.Empty : "\n📉 " + giftBase.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(giftBase.Percentile75 is null ? string.Empty : " | 📈 " + giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift)
+        {
+            return $"""
+                    [Второй флор]({secondFloorGift.BotUrl})
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
+    }
+
+    #endregion
+
+    #region ArithmeticMeanThree
+
+    public async Task SendSignalArithmeticMeanThree(GiftPercentile25Criterion gift)
+    {
+        await using var dbContext = new ApplicationDbContext();
+        (GiftBase gift, Activity secondFloorActivity, double? secondFloorPercentile75, double? secondFloorPercentile25)
+            baseGift = (gift.Type switch
+            {
+                SignalType.TonnelTonnel => (gift: gift.TonnelGift, secondFloorActivity: gift.TonnelGift!.Activity,
+                    secondFloorPercentile75: gift.TonnelGift!.Percentile75,
+                    secondFloorPercentile25: gift.TonnelGift!.Percentile25),
+                SignalType.TonnelPortals => (gift: gift.TonnelGift, secondFloorActivity: gift.PortalsGift!.Activity,
+                    secondFloorPercentile75: gift.PortalsGift!.Percentile75,
+                    secondFloorPercentile25: gift.PortalsGift!.Percentile25),
+                SignalType.PortalsTonnel => (gift.PortalsGift!, secondFloorActivity: gift.TonnelGift!.Activity,
+                    secondFloorPercentile75: gift.TonnelGift!.Percentile75,
+                    secondFloorPercentile25: gift.TonnelGift!.Percentile25),
+                SignalType.PortalsPortals => (gift.PortalsGift!, secondFloorActivity: gift.PortalsGift!.Activity,
+                    secondFloorPercentile75: gift.PortalsGift!.Percentile75,
+                    secondFloorPercentile25: gift.PortalsGift!.Percentile25),
+                _ => throw new Exception("Unknown gift type.")
+            })!;
+        var giftSaleStatus =
+            baseGift.gift.TelegramGiftInfo.Signature ? GiftSignatureStatus.Dirty : GiftSignatureStatus.Clean;
+        var users = await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.IsStarted && x.License >= DateTimeOffset.UtcNow &&
+                        x.Criteria.Contains(Criterion.ArithmeticMeanThree) &&
+                        x.PriceMin <= baseGift.gift.Price && x.PriceMax >= baseGift.gift.Price &&
+                        x.ProfitPercent <= gift.PercentDiff &&
+                        x.ModelPercentMin <= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
+                        x.ModelPercentMax >= baseGift.gift.TelegramGiftInfo.Model.Item2 &&
+                        x.SignalTypes.Contains((SignalType)gift.Type) &&
+                        x.GiftSignatureStatus.Contains(giftSaleStatus) &&
+                        x.Activities.Contains(baseGift.secondFloorActivity) &&
+                        (x.Percentile == Percentile.None
+                         || (x.Percentile == Percentile.Percentile25 &&
+                             baseGift.gift.Price <= baseGift.secondFloorPercentile25)
+                         || (x.Percentile == Percentile.Percentile75 &&
+                             baseGift.gift.Price <= baseGift.secondFloorPercentile75)))
+            .OrderBy(x => Guid.NewGuid())
+            .ToArrayAsync();
+        if (users.Length == 0) return;
+
+        var (fullKeyboard, fullMessage) = BuildFullSignalMessageArithmeticMeanThree(gift);
+        var (compactKeyboard, compactMessage) = BuildCompactSignalMessageArithmeticMeanThree(gift);
+        foreach (var groupUsers in new[]
+                 {
+                     (users.Where(x => x.MessageType == MessageType.Full), MessageType.Full),
+                     (users.Where(x => x.MessageType == MessageType.Compact), MessageType.Compact)
+                 })
+        {
+            InlineKeyboardMarkup keyboard;
+            string message;
+            if (groupUsers.Item2 == MessageType.Full)
+            {
+                keyboard = fullKeyboard;
+                message = fullMessage;
+            }
+            else
+            {
+                keyboard = compactKeyboard;
+                message = compactMessage;
+            }
+
+            foreach (var user in groupUsers.Item1)
+                try
+                {
+                    await _botClient.SendMessage(user.Id, message, replyMarkup: keyboard,
+                        parseMode: ParseMode.Markdown);
+                }
+                catch
+                {
+                    // ignored
+                }
+        }
+    }
+
+    private (InlineKeyboardMarkup keyboard, string message) BuildFullSignalMessageArithmeticMeanThree(
+        GiftPercentile25Criterion gift)
+    {
+        var table = BuildSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo) = gift.Type switch
+        {
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        var secondInfo = (gift.Type, gift.SecondFloorMarket) switch
+        {
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Tonnel)
+                when gift.TonnelGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!, Market.Tonnel),
+
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Portals)
+                when gift.PortalsGift is not null
+                => BuildGiftInfo(gift.PortalsGift!, Market.Portals, true),
+
+            (SignalType.PortalsPortals, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsPortals, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!, Market.Portals),
+
+            (SignalType.PortalsTonnel, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsTonnel, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!, Market.Portals),
+
+            _ => null
+        };
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
+
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $"\n💹 *Перспектива с комиссией:* {gift.PercentDiffWithCommission?.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%")}
+
+                           🔍 *Критерий:* {CriterionToStringCompact(Criterion.ArithmeticMeanThree)}
+
+                           {firstInfo}{(secondInfo is null ? string.Empty : $"\n\n{secondInfo}")}
+
+                           Изменения рынка:
+                           📆 1 день: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+                           📆 7 дней: {(gift.BubblesDataGift is not null ? gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%' : "Недостаточно данных")}
+
+                           📊История продаж:
+                           ```
+                           {table}
+                           ```
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
+        }
+
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    --- {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (2 флор)]({giftBase.BotUrl})")} --- 
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    🔥 *Активность:* {ActivityToString(giftBase.Activity)}
+                    📉 *Нижний уровень цен (25%):* {(giftBase.Percentile25 is not null ? $"{giftBase.Percentile25.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    📈 *Высокий уровень цен (75%):* {(giftBase.Percentile75 is not null ? $"{giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture)} TON" : "Недостаточно данных")}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift, Market market)
+        {
+            return $"""
+                    --- [{market.ToString().ToUpper()} (2 флор)]({secondFloorGift.BotUrl}) --- 
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ *Состояние:* Грязный" : "✅ *Состояние:* Чистый")}
+                    💲 *Текущая цена:* {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
+    }
+
+    private (InlineKeyboardMarkup keyboard, string message) BuildCompactSignalMessageArithmeticMeanThree(
+        GiftPercentile25Criterion gift)
+    {
+        var table = BuildCompactSignalTable(gift.TonnelGift?.ActivityHistoryAll, gift.PortalsGift?.ActivityHistoryAll);
+        var keyboard = BuildKeyboardSecondFloor(gift);
+        var (title, firstInfo) = gift.Type switch
+        {
+            SignalType.TonnelTonnel => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.TonnelPortals => (
+                BuildTitle(gift.TonnelGift!),
+                BuildGiftInfo(gift.TonnelGift!, Market.Tonnel)),
+            SignalType.PortalsPortals => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            SignalType.PortalsTonnel => (
+                BuildTitle(gift.PortalsGift!),
+                BuildGiftInfo(gift.PortalsGift!, Market.Portals)),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        var secondInfo = (gift.Type, gift.SecondFloorMarket) switch
+        {
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Tonnel)
+                when gift.TonnelGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.TonnelGift!.SecondFloorGift!),
+
+            (SignalType.TonnelTonnel or SignalType.TonnelPortals, Market.Portals)
+                when gift.PortalsGift is not null
+                => BuildGiftInfo(gift.PortalsGift!, Market.Portals, true),
+
+            (SignalType.PortalsPortals, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsPortals, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!),
+
+            (SignalType.PortalsTonnel, Market.Tonnel)
+                when gift.TonnelGift is not null
+                => BuildGiftInfo(gift.TonnelGift!, Market.Tonnel),
+
+            (SignalType.PortalsTonnel, Market.Portals)
+                when gift.PortalsGift?.SecondFloorGift is not null
+                => BuildGiftInfoSecondFloor(gift.PortalsGift!.SecondFloorGift!),
+
+            _ => null
+        };
+        return (keyboard, $"""
+                           {title}
+                           🔄 *{SignalTypeToString((SignalType)gift.Type)}*
+                           💹 *Перспектива:* {gift.PercentDiff.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}%{(gift.PercentDiffWithCommission is null ? string.Empty : $" ({gift.PercentDiffWithCommission.Value.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture)}% с комиссией)")}
+                           🔍 *Критерий:* {CriterionToStringCompact(Criterion.ArithmeticMeanThree)}
+
+                           {firstInfo}
+
+                           {secondInfo}
+
+                           {(gift.BubblesDataGift is null ? string.Empty : $"""
+
+                                                                            Изменения рынка:
+                                                                            📆 1 день: {gift.BubblesDataGift.Change!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            📆 7 дней: {gift.BubblesDataGift.Change7d!.Value.ToString("+0.##;-0.##;0") + '%'}
+                                                                            """)}
+                           {(table is null ? string.Empty : $"""
+
+                                                             📊История продаж:
+                                                             ```
+                                                             {table}
+                                                             ```
+                                                             """)}
+                           """);
+
+        string BuildTitle(GiftBase giftBase)
+        {
+            return
+                $"[🎁](https://t.me/nft/{giftBase.TelegramGiftId}) *{giftBase.Name} | {giftBase.TelegramGiftInfo.Model.Item1} ({giftBase.TelegramGiftInfo.Model.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%) | {giftBase.TelegramGiftInfo.Backdrop.Item1} ({giftBase.TelegramGiftInfo.Backdrop.Item2.ToString("0.#", CultureInfo.InvariantCulture)}%)*";
+        }
+
+        string BuildGiftInfo(GiftBase giftBase, Market market, bool isSecondFloor = false)
+        {
+            return $"""
+                    {(!isSecondFloor ? market.ToString().ToUpper() : $"[{market.ToString().ToUpper()} (Второй флор)]({giftBase.BotUrl})")}
+                    {(giftBase.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {giftBase.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON | 🔥 {ActivityToString(giftBase.Activity)}{(giftBase.Percentile25 is null ? string.Empty : "\n📉 " + giftBase.Percentile25?.ToString("0.##", CultureInfo.InvariantCulture))}{(giftBase.Percentile75 is null ? string.Empty : " | 📈 " + giftBase.Percentile75.Value.ToString("0.##", CultureInfo.InvariantCulture))}
+                    """;
+        }
+
+        string BuildGiftInfoSecondFloor(SecondFloorGift secondFloorGift)
+        {
+            return $"""
+                    [Второй флор]({secondFloorGift.BotUrl})
+                    {(secondFloorGift.TelegramGiftInfo.Signature ? "❌ Грязный" : "✅ Чистый")} | 💲 {secondFloorGift.Price.ToString("0.##", CultureInfo.InvariantCulture)} TON
+                    """;
+        }
+    }
+
+    #endregion
 
     #endregion
 }

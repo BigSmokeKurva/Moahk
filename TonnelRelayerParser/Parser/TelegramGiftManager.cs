@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using AngleSharp.Html.Parser;
+using Moahk.Parser.Data;
 using NLog;
 
 namespace Moahk.Parser;

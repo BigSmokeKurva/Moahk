@@ -16,7 +16,7 @@ public class User
     public double PriceMin { get; set; }
     public double PriceMax { get; set; } = 10000;
     public int ProfitPercent { get; set; } = 10;
-    public Criteria Criteria { get; set; } = Criteria.SecondFloor;
+    public List<Criterion> Criteria { get; set; } = [Criterion.Percentile25WithoutBackdrop];
     public Status Status { get; set; } = Status.None;
     public bool IsStarted { get; set; }
     public double ModelPercentMin { get; set; }
