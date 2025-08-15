@@ -84,7 +84,7 @@ public class TonnelRelayerBrowserContextPool(TelegramAccountRepository telegramA
                 "--disable-software-rasterizer",
                 "--ignore-certificate-errors",
                 "--ignore-ssl-errors",
-                // "--disable-web-security",
+                "--disable-web-security",
                 "--headless=new",
                 "--proxy-server=http://localhost:80"
             ]
@@ -201,7 +201,7 @@ public class TonnelRelayerBrowserContextPool(TelegramAccountRepository telegramA
                 }
             };
             await page.GotoAsync(
-                "https://gifts3.tonnel.network/api/pageGifts");
+                "https://marketplace.tonnel.network/");
             return browserContextItem;
         }));
         Size = proxies.Length;

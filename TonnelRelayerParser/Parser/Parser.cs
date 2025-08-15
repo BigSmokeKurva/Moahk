@@ -347,7 +347,7 @@ public class Parser : IAsyncDisposable
             if (searchBackdrop)
                 response = await _tonnelRelayerBrowserContextPool
                     .PostAsJsonAsync<TonnelRelayerHistoryGiftInfoResponse[], object>(
-                        "https://gifts3.tonnel.network/api/saleHistory",
+                        "https://rs-gifts.tonnel.network/api/saleHistory",
                         new
                         {
                             authData = _telegramRepository.TonnelRelayerDecodedTgWebAppData,
@@ -365,7 +365,7 @@ public class Parser : IAsyncDisposable
             else
                 response = await _tonnelRelayerBrowserContextPool
                     .PostAsJsonAsync<TonnelRelayerHistoryGiftInfoResponse[], object>(
-                        "https://gifts3.tonnel.network/api/saleHistory",
+                        "https://rs-gifts.tonnel.network/api/saleHistory",
                         new
                         {
                             authData = _telegramRepository.TonnelRelayerDecodedTgWebAppData,
@@ -397,7 +397,7 @@ public class Parser : IAsyncDisposable
         {
             var response =
                 await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelSearchResponse[], object>(
-                    "https://gifts3.tonnel.network/api/pageGifts", new
+                    "https://rs-gifts.tonnel.network/api/pageGifts", new
                     {
                         page = 1,
                         limit = 30,
@@ -926,7 +926,7 @@ public class Parser : IAsyncDisposable
         {
             var response =
                 await _tonnelRelayerBrowserContextPool.PostAsJsonAsync<TonnelRelayerGiftInfoResponse[], object>(
-                    "https://gifts3.tonnel.network/api/pageGifts", new
+                    "https://rs-gifts.tonnel.network/api/pageGifts", new
                     {
                         page,
                         limit = 30,
