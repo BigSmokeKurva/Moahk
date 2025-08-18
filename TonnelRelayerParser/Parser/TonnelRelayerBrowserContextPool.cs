@@ -60,14 +60,12 @@ public class TonnelRelayerBrowserContextPool(TelegramAccountRepository telegramA
 
     public async Task Start()
     {
-        if (_playwright is not null)
-            throw new Exception("Playwright уже инициализирован");
-        _playwright = await Playwright.CreateAsync();
+        _playwright ??= await Playwright.CreateAsync();
         var proxies = LoadProxies();
         if (proxies.Length == 0)
             throw new Exception("Нет доступных прокси");
 
-        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        _browser ??= await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
             Headless = false,
             Args =
@@ -205,6 +203,22 @@ public class TonnelRelayerBrowserContextPool(TelegramAccountRepository telegramA
             return browserContextItem;
         }));
         Size = proxies.Length;
+        _browser.Disconnected += async (_, msg) =>
+        {
+            Logger.Error($"Браузер {msg} отключен, перезапуск пула браузеров");
+            try
+            {
+                await _browser.CloseAsync();
+                await _browser.DisposeAsync();
+            }
+            catch
+            {
+                // ignored
+            }
+
+            _browser = null;
+            await Start();
+        };
         Logger.Info($"Создан пул браузеров с {proxies.Length} прокси");
     }
 
